@@ -1,0 +1,22 @@
+# Git files
+.git
+.gitignore
+
+# Virtual env
+.venv/
+.env*
+
+# Developer tools
+.ruff_cache/
+.pytest_cache/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# IDE
+.vscode/
+.devcontainer/
+
+# Database
+postgres_data/

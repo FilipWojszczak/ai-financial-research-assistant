@@ -1,0 +1,19 @@
+{
+    "name": "AI Financial Research Assistant Dev Environment",
+    "dockerComposeFile": ["../docker-compose.yml"],
+    "service": "app",
+    "workspaceFolder": "/workspace",
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/local/bin/python"
+            },
+        "extensions": [
+            "ms-python.python",
+            "charliermarsh.ruff",
+            "tamasfe.even-better-toml"
+        ]
+        }
+    },
+    "postCreateCommand": "uv sync"
+}

@@ -5,10 +5,12 @@
 # Virtual env
 .venv/
 .env*
+.python-version
 
 # Developer tools
 .ruff_cache/
 .pytest_cache/
+.pre-commit-config.yaml
 
 # Python cache
 __pycache__/

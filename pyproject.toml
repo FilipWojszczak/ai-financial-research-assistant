@@ -14,3 +14,8 @@ dependencies = [
     "sqlalchemy>=2.0.48",
     "uvicorn>=0.42.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+]

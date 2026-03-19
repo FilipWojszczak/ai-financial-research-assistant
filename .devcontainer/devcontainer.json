@@ -15,5 +15,5 @@
         ]
         }
     },
-    "postCreateCommand": "uv sync"
+    "postCreateCommand": "uv sync && pre-commit install && pre-commit install --hook-type commit-msg"
 }

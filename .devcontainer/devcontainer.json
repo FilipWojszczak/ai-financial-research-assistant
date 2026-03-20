@@ -6,14 +6,35 @@
     "customizations": {
         "vscode": {
             "settings": {
-                "python.defaultInterpreterPath": "/usr/local/bin/python"
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+
+                "editor.formatOnSave": true,
+                "editor.codeActionsOnSave": {
+                    "source.fixAll": "explicit",
+                    "source.organizeImports": "explicit"
+                },
+
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff"
+                },
+                "[yaml]": {
+                    "editor.defaultFormatter": "redhat.vscode-yaml"
+                },
+                "[toml]": {
+                    "editor.defaultFormatter": "tamasfe.even-better-toml"
+                }
             },
         "extensions": [
             "ms-python.python",
             "charliermarsh.ruff",
-            "tamasfe.even-better-toml"
+            "tamasfe.even-better-toml",
+            "redhat.vscode-yaml",
+            "ms-azuretools.vscode-docker",
+            "github.vscode-github-actions",
+            "mikestead.dotenv",
+            "davidanson.vscode-markdownlint"
         ]
         }
     },
-    "postCreateCommand": "uv sync && pre-commit install && pre-commit install --hook-type commit-msg"
+    "postCreateCommand": "uv sync && uv run pre-commit install && uv run pre-commit install --hook-type commit-msg"
 }

@@ -1,0 +1,34 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4 # Checkout the repository to the GitHub Actions runner
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true # Enable caching for uv dependencies
+          cache-dependency-glob: uv.lock # Cache dependencies based on the uv.lock file (not pyproject.toml and others, which may change more frequently)
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install dependencies
+        run: uv sync --dev --frozen # Flag --frozen ensures that the exact versions specified in uv.lock are installed, preventing updating it based on pyproject.toml changes
+
+      - name: Check formatting with Ruff
+        run: uv run ruff format --check . # Check code formatting with Ruff, using --check to only report issues without modifying files
+
+      - name: Lint code with Ruff
+        run: uv run ruff check --output-format=github . # Use --output-format=github to format linting results in a way that GitHub can parse and display inline in the pull request

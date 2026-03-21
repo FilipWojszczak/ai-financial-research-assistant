@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:17-alpine
+    # Automatically restarts the container after a system reboot or database crash
     restart: always
     env_file:
       - .env
@@ -18,6 +19,8 @@ services:
     build:
       context: .
     volumes:
+      # Mounts code to /workspace.
+      # The :cached flag optimizes the filesystem on macOS; it's natively ignored on Ubuntu, but good practice.
       - .:/workspace:cached
     env_file:
       - .env
@@ -26,6 +29,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Doesn't start the app immediately. Keeps the container alive in the background
+    # so it is possible to freely connect via the terminal and manually run code.
     command: sleep infinity
 
 volumes:

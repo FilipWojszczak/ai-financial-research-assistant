@@ -1,0 +1,40 @@
+{
+    "name": "AI Financial Research Assistant Dev Environment",
+    "dockerComposeFile": ["../docker-compose.yml"],
+    "service": "app",
+    "workspaceFolder": "/workspace",
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+
+                "editor.formatOnSave": true,
+                "editor.codeActionsOnSave": {
+                    "source.fixAll": "explicit",
+                    "source.organizeImports": "explicit"
+                },
+
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff"
+                },
+                "[yaml]": {
+                    "editor.defaultFormatter": "redhat.vscode-yaml"
+                },
+                "[toml]": {
+                    "editor.defaultFormatter": "tamasfe.even-better-toml"
+                }
+            },
+        "extensions": [
+            "ms-python.python",
+            "charliermarsh.ruff",
+            "tamasfe.even-better-toml",
+            "redhat.vscode-yaml",
+            "ms-azuretools.vscode-docker",
+            "github.vscode-github-actions",
+            "mikestead.dotenv",
+            "davidanson.vscode-markdownlint"
+        ]
+        }
+    },
+    "postCreateCommand": "uv sync && uv run pre-commit install && uv run pre-commit install --hook-type commit-msg"
+}

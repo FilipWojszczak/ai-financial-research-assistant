@@ -1,4 +1,4 @@
-module.exports = {
+export default {
     extends: ['@commitlint/config-conventional'],
     rules: {
         // Rule: 2 = error, 'always' = always check, and the list of allowed scopes

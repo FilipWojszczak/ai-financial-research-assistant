@@ -12,15 +12,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4 # Checkout the repository to the GitHub Actions runner
+        uses: actions/checkout@v6 # Checkout the repository to the GitHub Actions runner
+
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true # Enable caching for uv dependencies
           cache-dependency-glob: uv.lock # Cache dependencies based on the uv.lock file (not pyproject.toml and others, which may change more frequently)
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version-file: ".python-version"
 

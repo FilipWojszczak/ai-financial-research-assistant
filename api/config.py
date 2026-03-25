@@ -8,8 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     environment: str = "development"
 
-    secret_key: str
-    algorithm: str
+    # secret_key: str # TODO: add secret key for signing tokens
+    # algorithm: str # TODO: add algorithm for signing tokens
 
     postgres_user: str | None = None
     postgres_password: str | None = None

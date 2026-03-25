@@ -2,12 +2,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from .db import close_langgraph_pool, init_langgraph_pool
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Starting up...")
+    await init_langgraph_pool()
     yield
-    print("Shutting down...")
+    await close_langgraph_pool()
 
 
 app = FastAPI(

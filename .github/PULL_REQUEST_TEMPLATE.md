@@ -1,6 +1,6 @@
 # Description
 
-[Briefly desccribe the reason for creating this PR and the context of the change]
+[Briefly describe the reason for creating this PR and the context of the change]
 
 ## Changes
 

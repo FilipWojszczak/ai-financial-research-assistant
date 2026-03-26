@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     # Automatically restarts the container after a system reboot or database crash
     restart: always
     env_file:
@@ -8,7 +8,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_vector_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -34,4 +34,4 @@ services:
     command: sleep infinity
 
 volumes:
-  postgres_data:
+  postgres_vector_data:

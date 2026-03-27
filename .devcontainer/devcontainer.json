@@ -3,6 +3,16 @@
     "dockerComposeFile": ["../docker-compose.yml"],
     "service": "app",
     "workspaceFolder": "/workspace",
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {
+            "installZsh": "false",
+            "username": "root",
+            "configureZshAsDefaultShell": "false"
+        }
+    },
+    "mounts": [
+        "source=ai-financial-bash-history,target=/commandhistory,type=volume"
+    ],
     "customizations": {
         "vscode": {
             "settings": {
@@ -36,5 +46,5 @@
         ]
         }
     },
-    "postCreateCommand": "uv sync && uv run pre-commit install && uv run pre-commit install --hook-type commit-msg"
+    "postCreateCommand": "touch /commandhistory/.bash_history && echo 'export HISTFILE=/commandhistory/.bash_history' >> ~/.bashrc && echo 'export PROMPT_COMMAND=\"history -a; history -c; history -r; $PROMPT_COMMAND\"' >> ~/.bashrc && uv sync && uv run pre-commit install && uv run pre-commit install --hook-type commit-msg"
 }

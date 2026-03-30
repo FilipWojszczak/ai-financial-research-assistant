@@ -1,50 +1,57 @@
 {
-    "name": "AI Financial Research Assistant Dev Environment",
-    "dockerComposeFile": ["../docker-compose.yml"],
-    "service": "app",
-    "workspaceFolder": "/workspace",
-    "features": {
-        "ghcr.io/devcontainers/features/common-utils:2": {
-            "installZsh": "false",
-            "username": "root",
-            "configureZshAsDefaultShell": "false"
-        }
-    },
-    "mounts": [
-        "source=ai-financial-bash-history,target=/commandhistory,type=volume"
-    ],
-    "customizations": {
-        "vscode": {
-            "settings": {
-                "python.defaultInterpreterPath": "/usr/local/bin/python",
+  "name": "AI Financial Research Assistant Dev Environment",
+  "dockerComposeFile": ["../docker-compose.yml"],
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": "false",
+      "username": "root",
+      "configureZshAsDefaultShell": "false"
+    }
+  },
+  "mounts": [
+    "source=ai-financial-bash-history,target=/commandhistory,type=volume"
+  ],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
 
-                "editor.formatOnSave": true,
-                "editor.codeActionsOnSave": {
-                    "source.fixAll": "explicit",
-                    "source.organizeImports": "explicit"
-                },
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.fixAll": "explicit",
+          "source.organizeImports": "explicit"
+        },
 
-                "[python]": {
-                    "editor.defaultFormatter": "charliermarsh.ruff"
-                },
-                "[yaml]": {
-                    "editor.defaultFormatter": "redhat.vscode-yaml"
-                },
-                "[toml]": {
-                    "editor.defaultFormatter": "tamasfe.even-better-toml"
-                }
-            },
-        "extensions": [
-            "ms-python.python",
-            "charliermarsh.ruff",
-            "tamasfe.even-better-toml",
-            "redhat.vscode-yaml",
-            "ms-azuretools.vscode-docker",
-            "github.vscode-github-actions",
-            "mikestead.dotenv",
-            "davidanson.vscode-markdownlint"
-        ]
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        },
+        "[yaml]": {
+          "editor.defaultFormatter": "redhat.vscode-yaml"
+        },
+        "[toml]": {
+          "editor.defaultFormatter": "tamasfe.even-better-toml"
+        },
+        "[json]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[jsonc]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
         }
-    },
-    "postCreateCommand": "touch /commandhistory/.bash_history && echo 'export HISTFILE=/commandhistory/.bash_history' >> ~/.bashrc && echo 'export PROMPT_COMMAND=\"history -a; history -c; history -r; $PROMPT_COMMAND\"' >> ~/.bashrc && uv sync && uv run pre-commit install && uv run pre-commit install --hook-type commit-msg"
+      },
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker",
+        "github.vscode-github-actions",
+        "mikestead.dotenv",
+        "davidanson.vscode-markdownlint",
+        "esbenp.prettier-vscode"
+      ]
+    }
+  },
+  "postCreateCommand": "touch /commandhistory/.bash_history && echo 'export HISTFILE=/commandhistory/.bash_history' >> ~/.bashrc && echo 'export PROMPT_COMMAND=\"history -a; history -c; history -r; $PROMPT_COMMAND\"' >> ~/.bashrc && uv sync && uv run pre-commit install && uv run pre-commit install --hook-type commit-msg"
 }

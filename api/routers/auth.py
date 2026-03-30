@@ -8,7 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from ..auth_dependencies import get_current_user
 from ..db import get_session
 from ..models import User
-from ..schemas.auth import Token, UserCreate, UserRead
+from ..schemas.auth import AccountDelete, PasswordUpdate, Token, UserCreate, UserRead
 from ..utils import authenticate_user, create_access_token, hash_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -85,3 +85,61 @@ async def login_for_access_token(
 )
 async def get_my_data(user: Annotated[User, Depends(get_current_user)]):
     return user
+
+
+@router.put(
+    "/me/password",
+    response_model=UserRead,
+    summary="Update the currently authenticated user's password",
+    description=(
+        "Updates the password for the currently authenticated user. "
+        "Requires the current password and the new password."
+    ),
+)
+async def update_password(
+    payload: PasswordUpdate,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    if not await authenticate_user(user.email, payload.current_password, session):
+        raise HTTPException(
+            status_code=401,
+            detail="Current password is incorrect",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if payload.current_password == payload.new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="Current password and new password cannot be the same",
+        )
+    user.hashed_password = hash_password(payload.new_password)
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+@router.delete(
+    "/me",
+    status_code=204,
+    summary="Delete the currently authenticated user's account",
+    description=(
+        "Deletes the account of the currently authenticated user. "
+        "This action is irreversible and will remove all user data from the system."
+    ),
+)
+async def delete_my_account(
+    payload: AccountDelete,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    if not await authenticate_user(user.email, payload.password, session):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    await session.delete(user)
+    await session.commit()
+    return

@@ -56,7 +56,7 @@ async def client_fixture(session: AsyncSession) -> AsyncGenerator[AsyncClient]:
 async def user_factory_fixture(
     session: AsyncSession,
 ) -> UserFactory:
-    async def _create_user(email: str, password: str = "securepassword") -> User:  # noqa: S107
+    async def _create_user(email: str, password: str = "securepassword") -> User:
         hashed_password = hash_password(password)
         user = User(email=email, hashed_password=hashed_password)
         session.add(user)

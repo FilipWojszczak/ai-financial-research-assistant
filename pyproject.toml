@@ -71,3 +71,11 @@ line-ending = "auto"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 env = ["ENVIRONMENT=testing"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+  "S101", # asserts
+  "S105", # hardcoded password strings
+  "S106", # hardcoded password function arguments
+  "S107", # hardcoded password function defaults
+]

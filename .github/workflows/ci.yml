@@ -9,7 +9,28 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-
+    env:
+      SECRET_KEY: ${{ secrets.TEST_SECRET_KEY }}
+      ALGORITHM: ${{ secrets.TEST_ALGORITHM }}
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_db
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6 # Checkout the repository to the GitHub Actions runner
@@ -33,3 +54,6 @@ jobs:
 
       - name: Lint code with Ruff
         run: uv run ruff check --output-format=github . # Use --output-format=github to format linting results in a way that GitHub can parse and display inline in the pull request
+
+      - name: Run tests
+        run: uv run pytest

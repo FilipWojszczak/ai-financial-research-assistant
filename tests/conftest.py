@@ -2,16 +2,17 @@ from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from api.config import get_settings
-from api.db import get_session
-from api.main import app
-from api.models import User
-from api.utils import create_access_token, hash_password
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 from tests.utils import TokenFactory, UserFactory
+
+from financial_assistant.api.server import app
+from financial_assistant.core.config import get_settings
+from financial_assistant.core.db import get_session
+from financial_assistant.models import User
+from financial_assistant.utils import create_access_token, hash_password
 
 
 @pytest_asyncio.fixture(name="session")

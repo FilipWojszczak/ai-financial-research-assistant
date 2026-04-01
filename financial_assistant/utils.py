@@ -5,7 +5,7 @@ from pwdlib import PasswordHash
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from .config import get_settings
+from .core.config import get_settings
 from .models import User
 
 settings = get_settings()

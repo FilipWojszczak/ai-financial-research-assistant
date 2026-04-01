@@ -3,7 +3,7 @@ from psycopg_pool import AsyncConnectionPool
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-# from . import models
+from .. import models  # noqa: F401
 from .config import get_settings
 
 database_url = get_settings().database_url

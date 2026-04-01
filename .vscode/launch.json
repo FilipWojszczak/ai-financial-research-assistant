@@ -7,7 +7,7 @@
       "request": "launch",
       "module": "uvicorn",
       "args": [
-        "api.main:app",
+        "financial_assistant.api.server:app",
         "--reload",
         "--host",
         "0.0.0.0",

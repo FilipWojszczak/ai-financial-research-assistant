@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from api.models import User
+from financial_assistant.models import User
 
 
 class UserFactory(Protocol):

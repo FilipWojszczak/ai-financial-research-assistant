@@ -5,11 +5,11 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from ..auth_dependencies import get_current_user
-from ..db import get_session
+from ..core.db import get_session
 from ..models import User
 from ..schemas.auth import AccountDelete, PasswordUpdate, Token, UserCreate, UserRead
 from ..utils import authenticate_user, create_access_token, hash_password
+from .dependencies.auth import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

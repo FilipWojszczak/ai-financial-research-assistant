@@ -1,7 +1,6 @@
 import pgvector.psycopg
 from psycopg_pool import AsyncConnectionPool
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from .. import models  # noqa: F401
 from .config import get_settings

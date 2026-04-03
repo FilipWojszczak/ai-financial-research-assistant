@@ -3,9 +3,11 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, DateTime, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, func
 from sqlalchemy import Enum as SAEnum
-from sqlmodel import Field, Relationship, SQLModel
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base
 
 if TYPE_CHECKING:
     from .user import User
@@ -19,50 +21,53 @@ class DocumentType(StrEnum):
     OTHER = "other"
 
 
-class Document(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    filename: str
-    company_ticker: str = Field(index=True)
-    document_type: DocumentType = Field(
-        sa_column=Column(
-            SAEnum(
-                DocumentType,
-                # Name of the enum type in the database - not necessary but name of type
-                #  remains the same in the database even after model updates
-                name="document_type_enum",
-                values_callable=lambda x: [
-                    e.value for e in x
-                ],  # Store enum values (instead of names) as strings in the database
-            ),
-            nullable=False,
-        )
+class Document(Base):
+    # to not change the existing table name after switching from SQLModel to SQLAlchemy
+    __tablename__ = "document"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    filename: Mapped[str] = mapped_column(String)
+    company_ticker: Mapped[str] = mapped_column(String, index=True)
+    document_type: Mapped[DocumentType] = mapped_column(
+        SAEnum(
+            DocumentType,
+            # Name of the enum type in the database - not necessary but name of type
+            #  remains the same in the database even after model updates
+            name="document_type_enum",
+            values_callable=lambda x: [
+                e.value for e in x
+            ],  # Store enum values (instead of names) as strings in the database
+        ),
+        nullable=False,
     )
-    year: int = Field(nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
     # when owner_id is None, it means the document is public and can be accessed by any
     #  user
-    owner_id: int | None = Field(default=None, foreign_key="user.id")
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
 
-    created_at: datetime | None = Field(
-        default=None,
-        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
 
-    owner: User = Relationship(back_populates="documents")
-    chunks: list["DocumentChunk"] = Relationship(
+    owner: Mapped[User | None] = relationship(back_populates="documents")
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
         back_populates="document",
-        sa_relationship_kwargs={
-            "cascade": "all, delete-orphan",
-            "passive_deletes": True,
-        },
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
-class DocumentChunk(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    document_id: int = Field(foreign_key="document.id", ondelete="CASCADE")
-    content: str
+class DocumentChunk(Base):
+    # to not change the existing table name after switching from SQLModel to SQLAlchemy
+    __tablename__ = "documentchunk"
 
-    embedding: list[float] = Field(sa_column=Column(Vector(1536)))
-    chunk_index: int = Field(unique=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE")
+    )
+    content: Mapped[str] = mapped_column(String)
 
-    document: Document = Relationship(back_populates="chunks")
+    embedding: Mapped[list[float]] = mapped_column(Vector(1536))
+    chunk_index: Mapped[int] = mapped_column(Integer, unique=True)
+
+    document: Mapped[Document] = relationship(back_populates="chunks")

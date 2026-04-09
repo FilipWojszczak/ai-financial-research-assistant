@@ -1,8 +1,8 @@
-"""init
+"""add_vector_extension
 
-Revision ID: 387da51a85bc
+Revision ID: bac3899e0118
 Revises:
-Create Date: 2026-03-27 11:39:54.987070
+Create Date: 2026-04-09 10:51:46.856233
 
 """
 from typing import Sequence, Union
@@ -13,19 +13,17 @@ import pgvector
 
 
 # revision identifiers, used by Alembic.
-revision: str = '387da51a85bc'
+revision: str = 'bac3899e0118'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
+    # Add the vector extension to the database
     op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-    # ### end Alembic commands ###
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
+    # Remove the vector extension from the database
     op.execute("DROP EXTENSION IF EXISTS vector;")
-    # ### end Alembic commands ###

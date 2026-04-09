@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -50,7 +52,7 @@ class Document(Base):
     )
 
     owner: Mapped[User | None] = relationship(back_populates="documents")
-    chunks: Mapped[list["DocumentChunk"]] = relationship(
+    chunks: Mapped[list[DocumentChunk]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
         passive_deletes=True,

@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from ..core.db import close_langgraph_pool, init_langgraph_pool
-from . import auth
+from .routers import auth
 
 
 @asynccontextmanager

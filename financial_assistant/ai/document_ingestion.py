@@ -6,6 +6,7 @@ from typing import Any
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document as LangchainDocument
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
@@ -70,3 +71,22 @@ def split_into_parent_and_child_chunks(
             )
 
     return parent_chunks_data, child_chunks_data
+
+
+def generate_child_embeddings(
+    child_chunks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Generate embeddings for child chunks using GoogleGenerativeAIEmbeddings. This
+    function takes the child chunks, extracts their content, and generates embeddings.
+    """
+    embeddings_model = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+    # Extract the content from child chunks to generate embeddings
+    texts = [chunk["content"] for chunk in child_chunks]
+    embeddings = embeddings_model.embed_documents(texts)
+
+    # Attach the generated embeddings back to the child chunks
+    for chunk, embedding in zip(child_chunks, embeddings, strict=True):
+        chunk["embedding"] = embedding
+
+    return child_chunks

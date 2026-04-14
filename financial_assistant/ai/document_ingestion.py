@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import tempfile
 import uuid
 from pathlib import Path
@@ -8,6 +9,12 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document as LangchainDocument
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..core.db import engine
+from ..models.document import ChildChunk, Document, DocumentStatus, ParentChunk
+
+logger = logging.getLogger(__name__)
 
 
 async def load_pdf_documents(file_bytes: bytes) -> list[LangchainDocument]:
@@ -90,3 +97,46 @@ def generate_child_embeddings(
         chunk["embedding"] = embedding
 
     return child_chunks
+
+
+async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None:
+    async with AsyncSession(engine) as session:
+        try:
+            documents = await load_pdf_documents(file_bytes)
+            parent_chunks, child_chunks = split_into_parent_and_child_chunks(documents)
+            embedded_children = generate_child_embeddings(child_chunks)
+
+            # Save parent_chunks and embedded_children to the database
+            session.add_all(
+                [
+                    ParentChunk(
+                        chunk_index=parent["chunk_index"],
+                        content=parent["content"],
+                        document_id=document_id,
+                    )
+                    for parent in parent_chunks
+                ]
+            )
+            session.add_all(
+                [
+                    ChildChunk(
+                        chunk_index=child["chunk_index"],
+                        content=child["content"],
+                        embedding=child["embedding"],
+                        parent_id=child["parent_id"],
+                    )
+                    for child in embedded_children
+                ]
+            )
+            await session.commit()
+
+            document = await session.get(Document, document_id)
+            if document:
+                document.status = DocumentStatus.COMPLETED
+                await session.commit()
+        except Exception as e:
+            logger.error(f"Error processing document {document_id}: {e!s}")
+            document = await session.get(Document, document_id)
+            if document:
+                document.status = DocumentStatus.FAILED
+                await session.commit()

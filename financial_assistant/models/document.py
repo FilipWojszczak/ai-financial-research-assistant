@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,6 +21,12 @@ class DocumentType(StrEnum):
     CURRENT_REPORT = "8-K"
     EARNINGS_CALL_TRANSCRIPT = "earnings_call_transcript"
     OTHER = "other"
+
+
+class DocumentStatus(StrEnum):
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class Document(Base):
@@ -43,33 +49,67 @@ class Document(Base):
         nullable=False,
     )
     year: Mapped[int] = mapped_column(Integer, nullable=False)
-    # when owner_id is None, it means the document is public and can be accessed by any
-    #  user
-    owner_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
+    status: Mapped[DocumentStatus] = mapped_column(
+        SAEnum(
+            DocumentStatus,
+            name="document_status_enum",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+        default=DocumentStatus.PROCESSING,
+    )
+
+    # when owner_id is None, it means the document is public and can be accessed by any
+    #  user
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
+
     owner: Mapped[User | None] = relationship(back_populates="documents")
-    chunks: Mapped[list[DocumentChunk]] = relationship(
+    parent_chunks: Mapped[list[ParentChunk]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
 
 
-class DocumentChunk(Base):
-    # to not change the existing table name after switching from SQLModel to SQLAlchemy
-    __tablename__ = "documentchunk"
-
+class ParentChunk(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(String)
+
     document_id: Mapped[int] = mapped_column(
         ForeignKey("document.id", ondelete="CASCADE")
     )
+    document: Mapped[Document] = relationship(back_populates="parent_chunks")
+    child_chunks: Mapped[list[ChildChunk]] = relationship(
+        back_populates="parent_chunk",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    # Ensure that the combination of document_id and chunk_index is unique to maintain
+    # the order of parent chunks within each document
+    __table_args__ = (
+        UniqueConstraint("document_id", "chunk_index", name="uix_document_chunk_index"),
+    )
+
+
+class ChildChunk(Base):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chunk_index: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(String)
+    embedding: Mapped[list[float]] = mapped_column(Vector(768))
 
-    embedding: Mapped[list[float]] = mapped_column(Vector(1536))
-    chunk_index: Mapped[int] = mapped_column(Integer, unique=True)
+    parent_id: Mapped[int] = mapped_column(
+        ForeignKey("parent_chunk.id", ondelete="CASCADE")
+    )
+    parent_chunk: Mapped[ParentChunk] = relationship(back_populates="child_chunks")
 
-    document: Mapped[Document] = relationship(back_populates="chunks")
+    # Ensure that the combination of parent_id and chunk_index is unique to maintain the
+    # order of child chunks within each parent chunk
+    __table_args__ = (
+        UniqueConstraint("parent_id", "chunk_index", name="uix_parent_chunk_index"),
+    )

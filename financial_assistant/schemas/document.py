@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..models.document import DocumentType
+from ..models.document import DocumentStatus, DocumentType
 
 
 class DocumentCreate(BaseModel):
@@ -25,6 +25,7 @@ class DocumentRead(BaseModel):
     company_ticker: str
     document_type: DocumentType
     year: int
+    status: DocumentStatus
     owner_id: int | None
 
     model_config = ConfigDict(from_attributes=True)

@@ -1,5 +1,5 @@
 from .base import Base
-from .document import Document, DocumentChunk
+from .document import ChildChunk, Document, ParentChunk
 from .user import User
 
-__all__ = ["Base", "Document", "DocumentChunk", "User"]
+__all__ = ["Base", "ChildChunk", "Document", "ParentChunk", "User"]

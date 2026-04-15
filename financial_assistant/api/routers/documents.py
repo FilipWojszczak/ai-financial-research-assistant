@@ -24,7 +24,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
         "The document will be processed in the background. The response will include "
         "the document metadata, and the status will indicate that the document is "
         "being processed. Once processing is complete, the status will be updated "
-        "accordingly\n\n."
+        "accordingly.\n\n"
         "If is_public is set, the document will be accessible to all users; otherwise, "
         "it will be private to the uploading user."
     ),

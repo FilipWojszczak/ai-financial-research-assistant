@@ -76,6 +76,8 @@ class Document(Base):
 
 
 class ParentChunk(Base):
+    __tablename__ = "parent_chunk"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     chunk_index: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(String)
@@ -98,6 +100,8 @@ class ParentChunk(Base):
 
 
 class ChildChunk(Base):
+    __tablename__ = "child_chunk"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     chunk_index: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(String)

@@ -71,7 +71,7 @@ def split_into_parent_and_child_chunks(
         for child_index, child_doc in enumerate(child_docs):
             child_chunks_data.append(
                 {
-                    "parent_id": parent_index,  # Link child to its parent
+                    "parent_index": parent_index,  # Link child to its parent
                     "content": child_doc.page_content,
                     "chunk_index": child_index,
                 }
@@ -107,34 +107,42 @@ async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None
             embedded_children = generate_child_embeddings(child_chunks)
 
             # Save parent_chunks and embedded_children to the database
-            session.add_all(
-                [
-                    ParentChunk(
-                        chunk_index=parent["chunk_index"],
-                        content=parent["content"],
-                        document_id=document_id,
-                    )
-                    for parent in parent_chunks
-                ]
-            )
-            session.add_all(
-                [
+            db_parents = [
+                ParentChunk(
+                    chunk_index=parent["chunk_index"],
+                    content=parent["content"],
+                    document_id=document_id,
+                )
+                for parent in parent_chunks
+            ]
+            session.add_all(db_parents)
+            await session.flush()
+
+            db_children = []
+            for child in embedded_children:
+                # Find the corresponding parent chunk object in the database using the
+                # parent_index from the child chunk data
+                parent_object = db_parents[child["parent_index"]]
+                db_children.append(
                     ChildChunk(
                         chunk_index=child["chunk_index"],
                         content=child["content"],
                         embedding=child["embedding"],
-                        parent_id=child["parent_id"],
+                        # Link the child chunk to its parent chunk using the parent's ID
+                        # from the database (not parent_index from the child chunk data)
+                        parent_id=parent_object.id,
                     )
-                    for child in embedded_children
-                ]
-            )
+                )
+            session.add_all(db_children)
             await session.commit()
 
+            # Update document status to COMPLETED
             document = await session.get(Document, document_id)
             if document:
                 document.status = DocumentStatus.COMPLETED
                 await session.commit()
         except Exception as e:
+            # Log the error and update document status to FAILED
             logger.error(f"Error processing document {document_id}: {e!s}")
             document = await session.get(Document, document_id)
             if document:

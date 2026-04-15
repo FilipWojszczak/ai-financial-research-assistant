@@ -9,9 +9,8 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document as LangchainDocument
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.db import engine
+from ..core.db import async_session_maker
 from ..models.document import ChildChunk, Document, DocumentStatus, ParentChunk
 
 logger = logging.getLogger(__name__)
@@ -100,7 +99,7 @@ def generate_child_embeddings(
 
 
 async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None:
-    async with AsyncSession(engine) as session:
+    async with async_session_maker() as session:
         try:
             documents = await load_pdf_documents(file_bytes)
             parent_chunks, child_chunks = split_into_parent_and_child_chunks(documents)

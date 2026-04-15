@@ -1,6 +1,6 @@
 import pgvector.psycopg
 from psycopg_pool import AsyncConnectionPool
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from .. import models  # noqa: F401
 from .config import get_settings
@@ -9,11 +9,18 @@ database_url = get_settings().database_url
 
 engine = create_async_engine(database_url, echo=True)
 
+async_session_maker = async_sessionmaker(
+    engine,
+    # Keeps objects in memory after commit. Required for FastAPI/Pydantic to read data
+    # without triggering synchronous lazy loads.
+    expire_on_commit=False,
+)
+
 _langgraph_pool: AsyncConnectionPool | None = None
 
 
 async def get_session():
-    async with AsyncSession(engine) as session:
+    async with async_session_maker() as session:
         yield session
 
 

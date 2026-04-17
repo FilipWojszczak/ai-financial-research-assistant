@@ -6,6 +6,7 @@ from fastapi import (
     Depends,
     File,
     Form,
+    HTTPException,
     UploadFile,
 )
 from sqlalchemy import or_, select
@@ -82,3 +83,29 @@ async def list_documents(
         )
     )
     return result.scalars().all()
+
+
+@router.get(
+    "/{document_id}",
+    response_model=DocumentRead,
+    summary="Get a document by ID",
+    description=(
+        "Returns a document if it is public or owned by the current user. "
+        "Returns 404 if the document does not exist or is not accessible."
+    ),
+)
+async def get_document(
+    document_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    result = await session.execute(
+        select(Document).where(
+            Document.id == document_id,
+            or_(Document.owner_id.is_(None), Document.owner_id == user.id),
+        )
+    )
+    document = result.scalar_one_or_none()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return document

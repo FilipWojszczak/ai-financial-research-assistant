@@ -109,3 +109,30 @@ async def get_document(
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return document
+
+
+@router.delete(
+    "/{document_id}",
+    status_code=204,
+    summary="Delete a document",
+    description=(
+        "Deletes a document owned by the current user. "
+        "Returns 404 if the document does not exist or is not accessible."
+    ),
+)
+async def delete_document(
+    document_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    result = await session.execute(
+        select(Document).where(
+            Document.id == document_id,
+            Document.owner_id == user.id,
+        )
+    )
+    document = result.scalar_one_or_none()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await session.delete(document)
+    await session.commit()

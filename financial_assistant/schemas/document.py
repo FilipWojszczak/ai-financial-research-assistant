@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..models.document import DocumentStatus, DocumentType
@@ -10,10 +12,14 @@ class DocumentCreate(BaseModel):
         "document"
     )
     document_type: DocumentType = Field(description="The type of the document")
-    year: int = Field(description="The year the document was published")
+    year: int = Field(
+        default_factory=lambda: datetime.now().year,
+        description="The year the document was published",
+    )
     is_public: bool = Field(
+        default=False,
         description="Indicates whether the document is public or belongs to a specific "
-        "user"
+        "user",
     )
 
     model_config = ConfigDict(extra="forbid")

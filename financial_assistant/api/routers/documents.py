@@ -1,6 +1,14 @@
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    UploadFile,
+)
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...ai.document_ingestion import process_uploaded_document
@@ -56,3 +64,21 @@ async def upload_document(
     )
 
     return db_document
+
+
+@router.get(
+    "/",
+    response_model=list[DocumentRead],
+    summary="List accessible documents",
+    description="Returns all public documents and documents owned by the current user.",
+)
+async def list_documents(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    result = await session.execute(
+        select(Document).where(
+            or_(Document.owner_id.is_(None), Document.owner_id == user.id)
+        )
+    )
+    return result.scalars().all()

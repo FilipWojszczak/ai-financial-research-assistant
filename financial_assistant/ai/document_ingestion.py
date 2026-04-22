@@ -86,7 +86,9 @@ def generate_child_embeddings(
     Generate embeddings for child chunks using GoogleGenerativeAIEmbeddings. This
     function takes the child chunks, extracts their content, and generates embeddings.
     """
-    embeddings_model = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+    embeddings_model = GoogleGenerativeAIEmbeddings(
+        model="models/gemini-embedding-001", output_dimensionality=768
+    )
     # Extract the content from child chunks to generate embeddings
     texts = [chunk["content"] for chunk in child_chunks]
     embeddings = embeddings_model.embed_documents(texts)

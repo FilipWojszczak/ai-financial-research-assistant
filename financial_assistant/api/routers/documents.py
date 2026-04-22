@@ -5,7 +5,6 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
-    Form,
     HTTPException,
     UploadFile,
 )
@@ -17,6 +16,7 @@ from ...core.db import get_session
 from ...models import Document, User
 from ...schemas.document import DocumentCreate, DocumentRead
 from ..dependencies.auth import get_current_user
+from ..dependencies.forms import document_create_form
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -39,7 +39,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
     ),
 )
 async def upload_document(
-    document_data: Annotated[DocumentCreate, Form()],
+    document_data: Annotated[DocumentCreate, Depends(document_create_form)],
     file: Annotated[UploadFile, File()],
     background_tasks: BackgroundTasks,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -48,7 +48,7 @@ async def upload_document(
     owner_id = None if document_data.is_public else user.id
 
     db_document = Document(
-        filename=document_data.filename,
+        filename=file.filename,
         company_ticker=document_data.company_ticker,
         document_type=document_data.document_type,
         year=document_data.year,

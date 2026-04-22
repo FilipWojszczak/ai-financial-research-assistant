@@ -6,7 +6,6 @@ from ..models.document import DocumentStatus, DocumentType
 
 
 class DocumentCreate(BaseModel):
-    filename: str = Field(description="The name of the file to be uploaded")
     company_ticker: str = Field(
         description="The stock ticker symbol of the company associated with the "
         "document"

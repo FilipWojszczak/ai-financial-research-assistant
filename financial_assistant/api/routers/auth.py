@@ -29,8 +29,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def register_user(
     user_data: UserCreate, session: Annotated[AsyncSession, Depends(get_session)]
 ):
-    result = await session.exec(select(User).where(User.email == user_data.email))
-    existing_user = result.one_or_none()
+    result = await session.execute(select(User).where(User.email == user_data.email))
+    existing_user = result.scalar_one_or_none()
     if existing_user:
         raise HTTPException(
             status_code=409, detail="User with this email already exists"

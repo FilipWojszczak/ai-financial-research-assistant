@@ -47,6 +47,9 @@ async def upload_document(
 ):
     owner_id = None if document_data.is_public else user.id
 
+    if not file.filename:
+        raise HTTPException(status_code=422, detail="File must have a filename")
+
     file_bytes = await file.read()
 
     db_document = Document(

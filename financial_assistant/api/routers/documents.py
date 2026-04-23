@@ -40,13 +40,15 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 )
 async def upload_document(
     document_data: Annotated[DocumentCreate, Depends(document_create_form)],
-    file: Annotated[UploadFile, File()],
+    file: Annotated[UploadFile, File(type="application/pdf")],
     background_tasks: BackgroundTasks,
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[User, Depends(get_current_user)],
 ):
     owner_id = None if document_data.is_public else user.id
 
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=422, detail="Only PDF files are allowed")
     if not file.filename:
         raise HTTPException(status_code=422, detail="File must have a filename")
 

@@ -79,7 +79,7 @@ def split_into_parent_and_child_chunks(
     return parent_chunks_data, child_chunks_data
 
 
-def generate_child_embeddings(
+async def generate_child_embeddings(
     child_chunks: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """
@@ -91,7 +91,7 @@ def generate_child_embeddings(
     )
     # Extract the content from child chunks to generate embeddings
     texts = [chunk["content"] for chunk in child_chunks]
-    embeddings = embeddings_model.embed_documents(texts)
+    embeddings = await embeddings_model.aembed_documents(texts)
 
     # Attach the generated embeddings back to the child chunks
     for chunk, embedding in zip(child_chunks, embeddings, strict=True):
@@ -105,7 +105,7 @@ async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None
         try:
             documents = await load_pdf_documents(file_bytes)
             parent_chunks, child_chunks = split_into_parent_and_child_chunks(documents)
-            embedded_children = generate_child_embeddings(child_chunks)
+            embedded_children = await generate_child_embeddings(child_chunks)
 
             # Save parent_chunks and embedded_children to the database
             db_parents = [

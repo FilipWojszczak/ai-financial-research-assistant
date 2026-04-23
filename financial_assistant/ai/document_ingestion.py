@@ -15,6 +15,10 @@ from ..models.document import ChildChunk, Document, DocumentStatus, ParentChunk
 
 logger = logging.getLogger(__name__)
 
+embeddings_model = GoogleGenerativeAIEmbeddings(
+    model="models/gemini-embedding-001", output_dimensionality=768
+)
+
 
 async def load_pdf_documents(file_bytes: bytes) -> list[LangchainDocument]:
     """
@@ -86,9 +90,6 @@ async def generate_child_embeddings(
     Generate embeddings for child chunks using GoogleGenerativeAIEmbeddings. This
     function takes the child chunks, extracts their content, and generates embeddings.
     """
-    embeddings_model = GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001", output_dimensionality=768
-    )
     # Extract the content from child chunks to generate embeddings
     texts = [chunk["content"] for chunk in child_chunks]
     embeddings = await embeddings_model.aembed_documents(texts)
@@ -144,7 +145,13 @@ async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None
         except Exception as e:
             # Log the error and update document status to FAILED
             logger.error(f"Error processing document {document_id}: {e!s}")
-            document = await session.get(Document, document_id)
-            if document:
-                document.status = DocumentStatus.FAILED
-                await session.commit()
+            try:
+                document = await session.get(Document, document_id)
+                if document:
+                    document.status = DocumentStatus.FAILED
+                    await session.commit()
+            except Exception as db_error:
+                logger.error(
+                    f"Failed to update status to FAILED for document "
+                    f"{document_id}: {db_error!s}"
+                )

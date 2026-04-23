@@ -122,7 +122,8 @@ async def get_document(
     summary="Delete a document",
     description=(
         "Deletes a document owned by the current user. "
-        "Returns 404 if the document does not exist or is not accessible."
+        "Returns 404 if the document does not exist or is not accessible. "
+        "Returns 403 if the document is public and cannot be deleted."
     ),
 )
 async def delete_document(
@@ -130,14 +131,13 @@ async def delete_document(
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[User, Depends(get_current_user)],
 ):
-    result = await session.execute(
-        select(Document).where(
-            Document.id == document_id,
-            Document.owner_id == user.id,
-        )
-    )
+    result = await session.execute(select(Document).where(Document.id == document_id))
     document = result.scalar_one_or_none()
-    if document is None:
+    if document is not None and document.owner_id is None:
+        raise HTTPException(
+            status_code=403, detail="Public documents cannot be deleted"
+        )
+    if document is None or document.owner_id != user.id:
         raise HTTPException(status_code=404, detail="Document not found")
     await session.delete(document)
     await session.commit()

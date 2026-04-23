@@ -47,6 +47,8 @@ async def upload_document(
 ):
     owner_id = None if document_data.is_public else user.id
 
+    file_bytes = await file.read()
+
     db_document = Document(
         filename=file.filename,
         company_ticker=document_data.company_ticker,
@@ -57,8 +59,6 @@ async def upload_document(
     session.add(db_document)
     await session.commit()
     await session.refresh(db_document)
-
-    file_bytes = await file.read()
 
     background_tasks.add_task(
         process_uploaded_document, document_id=db_document.id, file_bytes=file_bytes

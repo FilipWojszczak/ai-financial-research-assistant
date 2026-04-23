@@ -135,13 +135,12 @@ async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None
                     )
                 )
             session.add_all(db_children)
-            await session.commit()
 
             # Update document status to COMPLETED
             document = await session.get(Document, document_id)
             if document:
                 document.status = DocumentStatus.COMPLETED
-                await session.commit()
+            await session.commit()
         except Exception as e:
             # Log the error and update document status to FAILED
             logger.error(f"Error processing document {document_id}: {e!s}")

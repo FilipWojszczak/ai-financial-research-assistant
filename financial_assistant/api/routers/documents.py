@@ -40,7 +40,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 )
 async def upload_document(
     document_data: Annotated[DocumentCreate, Depends(document_create_form)],
-    file: Annotated[UploadFile, File(type="application/pdf")],
+    file: Annotated[UploadFile, File()],
     background_tasks: BackgroundTasks,
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[User, Depends(get_current_user)],

@@ -4,12 +4,13 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from tests.utils import TokenFactory, UserFactory
+from tests.utils import DocumentFactory, TokenFactory, UserFactory
 
 from financial_assistant.api.server import app
 from financial_assistant.core.config import get_settings
 from financial_assistant.core.db import get_session
-from financial_assistant.models import Base, User
+from financial_assistant.models import Base, Document, User
+from financial_assistant.models.document import DocumentStatus, DocumentType
 from financial_assistant.utils import create_access_token, hash_password
 
 
@@ -26,7 +27,7 @@ async def session_fixture() -> AsyncGenerator[AsyncSession]:
     connection = await engine.connect()
     transaction = await connection.begin()
 
-    session = AsyncSession(bind=connection)
+    session = AsyncSession(bind=connection, expire_on_commit=False)
 
     yield session
 
@@ -72,3 +73,29 @@ def token_factory_fixture() -> TokenFactory:
         return create_access_token(user.id)
 
     return _create_token
+
+
+@pytest_asyncio.fixture(name="document_factory")
+async def document_factory_fixture(session: AsyncSession) -> DocumentFactory:
+    async def _create(
+        owner_id: int | None = None,
+        company_ticker: str = "AAPL",
+        document_type: DocumentType = DocumentType.ANNUAL_REPORT,
+        year: int = 2023,
+        filename: str = "test.pdf",
+        status: DocumentStatus = DocumentStatus.COMPLETED,
+    ) -> Document:
+        document = Document(
+            filename=filename,
+            company_ticker=company_ticker,
+            document_type=document_type,
+            year=year,
+            owner_id=owner_id,
+            status=status,
+        )
+        session.add(document)
+        await session.commit()
+        await session.refresh(document)
+        return document
+
+    return _create

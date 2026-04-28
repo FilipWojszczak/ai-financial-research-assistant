@@ -3,7 +3,10 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8)
+    password: str = Field(
+        min_length=8, description="The password must be at least 8 characters long"
+    )
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -21,8 +24,8 @@ class Token(BaseModel):
 
 
 class PasswordUpdate(BaseModel):
-    current_password: str = Field(min_length=8)
-    new_password: str = Field(min_length=8)
+    current_password: str = Field(min_length=8, description="The current password")
+    new_password: str = Field(min_length=8, description="The new password")
 
     model_config = ConfigDict(extra="forbid")
 

@@ -2,14 +2,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.db import get_session
-from ..models import User
-from ..schemas.auth import AccountDelete, PasswordUpdate, Token, UserCreate, UserRead
-from ..utils import authenticate_user, create_access_token, hash_password
-from .dependencies.auth import get_current_user
+from ...core.db import get_session
+from ...models import User
+from ...schemas.auth import AccountDelete, PasswordUpdate, Token, UserCreate, UserRead
+from ...utils import authenticate_user, create_access_token, hash_password
+from ..dependencies.auth import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -29,8 +29,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def register_user(
     user_data: UserCreate, session: Annotated[AsyncSession, Depends(get_session)]
 ):
-    result = await session.exec(select(User).where(User.email == user_data.email))
-    existing_user = result.one_or_none()
+    result = await session.execute(select(User).where(User.email == user_data.email))
+    existing_user = result.scalar_one_or_none()
     if existing_user:
         raise HTTPException(
             status_code=409, detail="User with this email already exists"

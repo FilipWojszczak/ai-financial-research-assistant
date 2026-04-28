@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from ..core.db import close_langgraph_pool, init_langgraph_pool
-from . import auth
+from .routers import auth, documents
 
 
 @asynccontextmanager
@@ -18,3 +18,4 @@ app = FastAPI(
 )
 
 app.include_router(auth.router)
+app.include_router(documents.router)

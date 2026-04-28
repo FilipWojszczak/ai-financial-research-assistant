@@ -17,6 +17,7 @@ jobs:
       POSTGRES_DB: test_db
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
+      GOOGLE_API_KEY: mock-google-api-key-for-testing
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -54,6 +55,11 @@ jobs:
 
       - name: Lint code with Ruff
         run: uv run ruff check --output-format=github . # Use --output-format=github to format linting results in a way that GitHub can parse and display inline in the pull request
+
+      - name: Create vector extension
+        run: psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB -c "CREATE EXTENSION IF NOT EXISTS vector;"
+        env:
+          PGPASSWORD: ${{ env.POSTGRES_PASSWORD }}
 
       - name: Run tests
         run: uv run pytest

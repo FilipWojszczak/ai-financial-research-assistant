@@ -13,6 +13,9 @@
   "mounts": [
     "source=ai-financial-bash-history,target=/commandhistory,type=volume"
   ],
+  "containerEnv": {
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}"
+  },
   "customizations": {
     "vscode": {
       "settings": {
@@ -49,9 +52,10 @@
         "github.vscode-github-actions",
         "mikestead.dotenv",
         "davidanson.vscode-markdownlint",
-        "esbenp.prettier-vscode"
+        "esbenp.prettier-vscode",
+        "anthropic.claude-code"
       ]
     }
   },
-  "postCreateCommand": "touch /commandhistory/.bash_history && echo 'export HISTFILE=/commandhistory/.bash_history' >> ~/.bashrc && echo 'export PROMPT_COMMAND=\"history -a; history -c; history -r; $PROMPT_COMMAND\"' >> ~/.bashrc && uv sync && uv run pre-commit install && uv run pre-commit install --hook-type commit-msg"
+  "postCreateCommand": "touch /commandhistory/.bash_history && echo 'export HISTFILE=/commandhistory/.bash_history' >> ~/.bashrc && echo 'export PROMPT_COMMAND=\"history -a; history -c; history -r; $PROMPT_COMMAND\"' >> ~/.bashrc && uv sync && uv run pre-commit install && uv run pre-commit install --hook-type commit-msg && curl -fsSL https://claude.ai/install.sh | bash"
 }

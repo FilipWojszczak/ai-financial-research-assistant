@@ -41,7 +41,19 @@
         },
         "[jsonc]": {
           "editor.defaultFormatter": "esbenp.prettier-vscode"
-        }
+        },
+
+        "sqltools.connections": [
+          {
+            "name": "AI Financial DB",
+            "driver": "PostgreSQL",
+            "server": "${env:POSTGRES_HOST}",
+            "port": "${env:POSTGRES_PORT}",
+            "database": "${env:POSTGRES_DB}",
+            "username": "${env:POSTGRES_USER}",
+            "password": "${env:POSTGRES_PASSWORD}"
+          }
+        ]
       },
       "extensions": [
         "ms-python.python",
@@ -53,7 +65,9 @@
         "mikestead.dotenv",
         "davidanson.vscode-markdownlint",
         "esbenp.prettier-vscode",
-        "anthropic.claude-code"
+        "anthropic.claude-code",
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-pg"
       ]
     }
   },

@@ -6,12 +6,14 @@ export default {
             2,
             'always',
             [
-                'api',        // FastAPI
-                'db',         // Database / PostgreSQL / SQL
-                'docker',     // Dockerfile / docker-compose
-                'ci',         // GitHub Actions
-                'core',       // App core / Bash scripts
-                'docs'        // Documentation
+                'api',          // FastAPI
+                'db',           // Database / PostgreSQL / SQL
+                'docker',       // Dockerfile / docker-compose
+                'ci',           // GitHub Actions
+                'core',         // App core / Bash scripts
+                'docs',         // Documentation
+                'devcontainer', // .devcontainer/, .vscode/ config
+                'deps'          // Dependency changes (uv, pyproject.toml)
             ]
         ],
         // small letters only for scope

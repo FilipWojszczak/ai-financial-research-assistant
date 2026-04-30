@@ -8,6 +8,9 @@
       "installZsh": "false",
       "username": "root",
       "configureZshAsDefaultShell": "false"
+    },
+    "ghcr.io/devcontainers/features/node:2.0.0": {
+      "version": "lts"
     }
   },
   "mounts": [
@@ -41,19 +44,7 @@
         },
         "[jsonc]": {
           "editor.defaultFormatter": "esbenp.prettier-vscode"
-        },
-
-        "sqltools.connections": [
-          {
-            "name": "AI Financial DB",
-            "driver": "PostgreSQL",
-            "server": "${env:POSTGRES_HOST}",
-            "port": "${env:POSTGRES_PORT}",
-            "database": "${env:POSTGRES_DB}",
-            "username": "${env:POSTGRES_USER}",
-            "password": "${env:POSTGRES_PASSWORD}"
-          }
-        ]
+        }
       },
       "extensions": [
         "ms-python.python",

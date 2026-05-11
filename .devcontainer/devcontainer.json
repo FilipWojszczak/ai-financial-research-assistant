@@ -44,7 +44,18 @@
         },
         "[jsonc]": {
           "editor.defaultFormatter": "esbenp.prettier-vscode"
-        }
+        },
+        "sqltools.connections": [
+          {
+            "name": "AI Financial DB",
+            "driver": "PostgreSQL",
+            "server": "${containerEnv:POSTGRES_HOST}",
+            "port": 5432,
+            "database": "${containerEnv:POSTGRES_DB}",
+            "username": "${containerEnv:POSTGRES_USER}",
+            "password": "${containerEnv:POSTGRES_PASSWORD}"
+          }
+        ]
       },
       "extensions": [
         "ms-python.python",

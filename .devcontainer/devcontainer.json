@@ -11,12 +11,14 @@
     },
     "ghcr.io/devcontainers/features/node:2.0.0": {
       "version": "lts"
-    }
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "mounts": [
     "source=ai-financial-bash-history,target=/commandhistory,type=volume",
     "source=${localEnv:HOME}/.claude,target=/root/.claude,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.claude.json,target=/root/.claude.json,type=bind,consistency=cached"
+    "source=${localEnv:HOME}/.claude.json,target=/root/.claude.json,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.config/gh,target=/root/.config/gh,type=bind,consistency=cached"
   ],
   "containerEnv": {
     "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}"

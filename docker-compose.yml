@@ -1,6 +1,6 @@
 services:
   db:
-    image: pgvector/pgvector:pg17
+    image: paradedb/paradedb:0.23.4-pg17
     # Automatically restarts the container after a system reboot or database crash
     restart: always
     env_file:

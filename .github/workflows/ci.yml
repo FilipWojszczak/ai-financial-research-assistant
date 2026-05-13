@@ -20,7 +20,7 @@ jobs:
       GOOGLE_API_KEY: mock-google-api-key-for-testing
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: paradedb/paradedb:0.23.4-pg17
         env:
           POSTGRES_USER: ${{ env.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}

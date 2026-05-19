@@ -11,7 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 
 if TYPE_CHECKING:
-    from .document import Document, ParentChunk
+    from .document import Document
 
 
 class EntityType(StrEnum):
@@ -93,8 +93,6 @@ class EntityRelationship(Base):
         foreign_keys=[target_entity_id],
         back_populates="target_relationships",
     )
-    document: Mapped[Document] = relationship()
-    chunk: Mapped[ParentChunk | None] = relationship()
 
 
 class GraphCommunity(Base):

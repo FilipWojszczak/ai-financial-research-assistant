@@ -11,7 +11,7 @@ from financial_assistant.ai.graph_extraction import (
     process_document_graph,
 )
 from financial_assistant.models.document import ParentChunk
-from financial_assistant.models.graph import EntityType
+from financial_assistant.models.graph import EntityRelationship, EntityType
 
 # ---------------------------------------------------------------------------
 # _normalize_entity_type - pure unit tests, no I/O
@@ -127,8 +127,6 @@ async def test_process_document_graph_skips_self_relationships():
             parent_chunks=[chunk],
         )
 
-    from financial_assistant.models.graph import EntityRelationship
-
     relationship_objects = [
         o for o in added_objects if isinstance(o, EntityRelationship)
     ]
@@ -159,8 +157,6 @@ async def test_process_document_graph_skips_unknown_relationship_entities():
             document_id=1,
             parent_chunks=[chunk],
         )
-
-    from financial_assistant.models.graph import EntityRelationship
 
     relationship_objects = [
         o for o in added_objects if isinstance(o, EntityRelationship)

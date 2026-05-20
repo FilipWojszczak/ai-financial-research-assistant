@@ -12,6 +12,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from ..core.db import async_session_maker
 from ..models.document import ChildChunk, Document, DocumentStatus, ParentChunk
+from .community_detection import process_document_communities
+from .graph_extraction import process_document_graph
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,11 @@ async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None
                     )
                 )
             session.add_all(db_children)
+            await session.flush()
+
+            # Extract entities/relationships and build the knowledge graph
+            entities = await process_document_graph(session, document_id, db_parents)
+            await process_document_communities(session, document_id, entities)
 
             # Update document status to COMPLETED
             document = await session.get(Document, document_id)

@@ -104,61 +104,74 @@ async def generate_child_embeddings(
 
 
 async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None:
-    async with async_session_maker() as session:
-        try:
-            documents = await load_pdf_documents(file_bytes)
-            parent_chunks, child_chunks = split_into_parent_and_child_chunks(documents)
-            embedded_children = await generate_child_embeddings(child_chunks)
-
-            # Save parent_chunks and embedded_children to the database
-            db_parents = [
-                ParentChunk(
-                    chunk_index=parent["chunk_index"],
-                    content=parent["content"],
-                    document_id=document_id,
-                )
-                for parent in parent_chunks
-            ]
-            session.add_all(db_parents)
-            await session.flush()
-
-            db_children = []
-            for child in embedded_children:
-                # Find the corresponding parent chunk object in the database using the
-                # parent_index from the child chunk data
-                parent_object = db_parents[child["parent_index"]]
-                db_children.append(
-                    ChildChunk(
-                        chunk_index=child["chunk_index"],
-                        content=child["content"],
-                        embedding=child["embedding"],
-                        # Link the child chunk to its parent chunk using the parent's ID
-                        # from the database (not parent_index from the child chunk data)
-                        parent_id=parent_object.id,
-                    )
-                )
-            session.add_all(db_children)
-            await session.flush()
-
-            # Extract entities/relationships and build the knowledge graph
-            entities = await process_document_graph(session, document_id, db_parents)
-            await process_document_communities(session, document_id, entities)
-
-            # Update document status to COMPLETED
-            document = await session.get(Document, document_id)
-            if document:
-                document.status = DocumentStatus.COMPLETED
-            await session.commit()
-        except Exception as e:
-            # Log the error and update document status to FAILED
-            logger.error(f"Error processing document {document_id}: {e!s}")
+    try:
+        async with async_session_maker() as session:
             try:
+                documents = await load_pdf_documents(file_bytes)
+                parent_chunks, child_chunks = split_into_parent_and_child_chunks(
+                    documents
+                )
+                embedded_children = await generate_child_embeddings(child_chunks)
+
+                # Save parent_chunks and embedded_children to the database
+                db_parents = [
+                    ParentChunk(
+                        chunk_index=parent["chunk_index"],
+                        content=parent["content"],
+                        document_id=document_id,
+                    )
+                    for parent in parent_chunks
+                ]
+                session.add_all(db_parents)
+                await session.flush()
+
+                db_children = []
+                for child in embedded_children:
+                    # Find the corresponding parent chunk object in the database using
+                    # the parent_index from the child chunk data
+                    parent_object = db_parents[child["parent_index"]]
+                    db_children.append(
+                        ChildChunk(
+                            chunk_index=child["chunk_index"],
+                            content=child["content"],
+                            embedding=child["embedding"],
+                            # Link the child to the database parent ID, not its
+                            # in-memory parent_index.
+                            parent_id=parent_object.id,
+                        )
+                    )
+                session.add_all(db_children)
+                await session.flush()
+
+                # Extract entities/relationships and build the knowledge graph
+                entities = await process_document_graph(
+                    session, document_id, db_parents
+                )
+                await process_document_communities(session, document_id, entities)
+
+                # Update document status to COMPLETED
                 document = await session.get(Document, document_id)
                 if document:
+                    document.status = DocumentStatus.COMPLETED
+                await session.commit()
+            except Exception:
+                # Discard all partially persisted ingestion data and restore the session
+                # to a usable state before it is closed.
+                await session.rollback()
+                raise
+    except Exception as e:
+        # Log the error and update document status to FAILED in an independent session.
+        # The processing session may have failed at flush/commit time and must not be
+        # reused for status persistence.
+        logger.error(f"Error processing document {document_id}: {e!s}")
+        try:
+            async with async_session_maker() as status_session:
+                document = await status_session.get(Document, document_id)
+                if document:
                     document.status = DocumentStatus.FAILED
-                    await session.commit()
-            except Exception as db_error:
-                logger.error(
-                    f"Failed to update status to FAILED for document "
-                    f"{document_id}: {db_error!s}"
-                )
+                    await status_session.commit()
+        except Exception as db_error:
+            logger.error(
+                f"Failed to update status to FAILED for document "
+                f"{document_id}: {db_error!s}"
+            )

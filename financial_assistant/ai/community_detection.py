@@ -14,7 +14,7 @@ from ..models.graph import (
 
 logger = logging.getLogger(__name__)
 
-_summary_llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+_summary_llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0)
 _embeddings_model = GoogleGenerativeAIEmbeddings(
     model="models/gemini-embedding-001", output_dimensionality=768
 )

@@ -10,7 +10,7 @@ from ..models.graph import Entity, EntityRelationship, EntityType
 
 logger = logging.getLogger(__name__)
 
-_extraction_llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+_extraction_llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0)
 
 
 class ExtractedEntity(BaseModel):

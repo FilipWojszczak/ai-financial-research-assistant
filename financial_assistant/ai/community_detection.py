@@ -54,7 +54,7 @@ async def _generate_community_summary(
     response = await _summary_llm.ainvoke(
         _SUMMARY_PROMPT.format(entities=entity_lines, relationships=rel_lines)
     )
-    content = str(response.content).strip()
+    content = response.text.strip()
 
     title = "Community"
     summary = content

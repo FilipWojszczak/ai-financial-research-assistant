@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from financial_assistant.ai.community_detection import (
@@ -37,12 +38,26 @@ def _make_relationship(
 
 def _make_session(relationships: list) -> tuple[AsyncMock, list]:
     session = AsyncMock(spec=AsyncSession)
-    session.flush = AsyncMock()
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = relationships
     session.execute.return_value = mock_result
     added_objects: list = []
+    next_community_id = 1
+
+    async def assign_community_ids():
+        nonlocal next_community_id
+        # Reproduce the relevant flush behavior so membership links use persisted IDs.
+        communities = [
+            obj
+            for obj in added_objects
+            if isinstance(obj, GraphCommunity) and obj.id is None
+        ]
+        for community in communities:
+            community.id = next_community_id
+            next_community_id += 1
+
     session.add = lambda obj: added_objects.append(obj)
+    session.flush = AsyncMock(side_effect=assign_community_ids)
     return session, added_objects
 
 
@@ -54,9 +69,8 @@ def _make_session(relationships: list) -> tuple[AsyncMock, list]:
 @pytest.mark.asyncio
 async def test_generate_community_summary_parses_title_and_summary():
     """Correctly structured LLM response is split into title and summary."""
-    mock_response = MagicMock()
-    mock_response.content = (
-        "TITLE: Apple Leadership\nSUMMARY: Tim Cook leads Apple as CEO."
+    mock_response = AIMessage(
+        content="TITLE: Apple Leadership\nSUMMARY: Tim Cook leads Apple as CEO."
     )
 
     with patch("financial_assistant.ai.community_detection._summary_llm") as mock_llm:
@@ -72,8 +86,7 @@ async def test_generate_community_summary_parses_title_and_summary():
 @pytest.mark.asyncio
 async def test_generate_community_summary_falls_back_when_format_not_followed():
     """When the LLM ignores the TITLE:/SUMMARY: format, safe defaults are returned."""
-    mock_response = MagicMock()
-    mock_response.content = "Some unstructured response"
+    mock_response = AIMessage(content="Some unstructured response")
 
     with patch("financial_assistant.ai.community_detection._summary_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=mock_response)
@@ -139,7 +152,23 @@ async def test_process_document_communities_saves_communities_and_memberships():
 
     assert len(communities) == 2
     assert len(memberships) == 4
+    assert all(c.document_id == 1 for c in communities)
     assert all(c.title == "Test Title" for c in communities)
+    assert all(c.summary == "Test summary." for c in communities)
+    assert {community.embedding[0] for community in communities} == {0.1, 0.2}
+
+    member_ids_by_community = {
+        community.id: {
+            membership.entity_id
+            for membership in memberships
+            if membership.community_id == community.id
+        }
+        for community in communities
+    }
+    assert {frozenset(ids) for ids in member_ids_by_community.values()} == {
+        frozenset({1, 2}),
+        frozenset({3, 4}),
+    }
 
 
 @pytest.mark.asyncio

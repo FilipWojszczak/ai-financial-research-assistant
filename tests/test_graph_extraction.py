@@ -11,7 +11,7 @@ from financial_assistant.ai.graph_extraction import (
     process_document_graph,
 )
 from financial_assistant.models.document import ParentChunk
-from financial_assistant.models.graph import EntityRelationship, EntityType
+from financial_assistant.models.graph import Entity, EntityRelationship, EntityType
 
 # ---------------------------------------------------------------------------
 # _normalize_entity_type - pure unit tests, no I/O
@@ -83,9 +83,17 @@ async def test_process_document_graph_deduplicates_entities():
     )
 
     session = AsyncMock(spec=AsyncSession)
-    session.flush = AsyncMock()
     added_objects: list = []
     session.add = lambda obj: added_objects.append(obj)
+
+    async def assign_entity_ids():
+        # SQLAlchemy assigns primary keys on flush. Without this behavior, every mocked
+        # entity ID is None and valid relationships look like self-relationships.
+        entities = [obj for obj in added_objects if isinstance(obj, Entity)]
+        for entity_id, entity in enumerate(entities, start=1):
+            entity.id = entity_id
+
+    session.flush = AsyncMock(side_effect=assign_entity_ids)
 
     with patch(
         "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
@@ -101,6 +109,18 @@ async def test_process_document_graph_deduplicates_entities():
     # "Apple Inc." appears in both chunks but should be stored once
     assert entity_names == {"Apple Inc.", "Tim Cook", "Cupertino"}
     assert len(entities) == 3
+
+    entity_ids = {entity.name: entity.id for entity in entities}
+    relationships = [
+        obj for obj in added_objects if isinstance(obj, EntityRelationship)
+    ]
+    assert {
+        (relationship.source_entity_id, relationship.target_entity_id)
+        for relationship in relationships
+    } == {
+        (entity_ids["Tim Cook"], entity_ids["Apple Inc."]),
+        (entity_ids["Apple Inc."], entity_ids["Cupertino"]),
+    }
 
 
 @pytest.mark.asyncio

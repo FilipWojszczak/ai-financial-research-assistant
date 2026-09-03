@@ -1,9 +1,15 @@
-from unittest.mock import AsyncMock, patch
+from io import BytesIO
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from fastapi import BackgroundTasks, HTTPException, UploadFile
 from httpx import AsyncClient
+from starlette.datastructures import Headers
 from tests.utils import DocumentFactory, TokenFactory, UserFactory
 
-from financial_assistant.models.document import DocumentStatus
+from financial_assistant.api.routers.documents import upload_document
+from financial_assistant.models.document import DocumentStatus, DocumentType
+from financial_assistant.schemas.document import DocumentCreate
 
 _PROCESS_TASK = "financial_assistant.api.routers.documents.process_uploaded_document"
 
@@ -35,7 +41,7 @@ async def test_upload_document_private(
     assert data["year"] == 2023
     assert data["status"] == DocumentStatus.PROCESSING
     assert data["owner_id"] == user.id
-    mock_process.assert_called_once()
+    mock_process.assert_awaited_once_with(document_id=data["id"], file_bytes=_VALID_PDF)
 
 
 async def test_upload_document_public(
@@ -44,7 +50,7 @@ async def test_upload_document_public(
     user = await user_factory(email="public_uploader@example.com")
     token = token_factory(user)
 
-    with patch(_PROCESS_TASK, new_callable=AsyncMock):
+    with patch(_PROCESS_TASK, new_callable=AsyncMock) as mock_process:
         response = await client.post(
             "/documents/",
             data={
@@ -57,7 +63,9 @@ async def test_upload_document_public(
         )
 
     assert response.status_code == 202
-    assert response.json()["owner_id"] is None
+    data = response.json()
+    assert data["owner_id"] is None
+    mock_process.assert_awaited_once_with(document_id=data["id"], file_bytes=_VALID_PDF)
 
 
 async def test_upload_document_wrong_content_type(
@@ -77,7 +85,7 @@ async def test_upload_document_wrong_content_type(
     assert response.json()["detail"] == "Only PDF files are allowed"
 
 
-async def test_upload_document_no_filename(
+async def test_upload_document_empty_filename_fails_validation(
     client: AsyncClient, user_factory: UserFactory, token_factory: TokenFactory
 ):
     user = await user_factory(email="no_filename@example.com")
@@ -91,6 +99,34 @@ async def test_upload_document_no_filename(
     )
 
     assert response.status_code == 422
+    error = response.json()["detail"][0]
+    assert error["loc"] == ["body", "file"]
+    assert error["type"] == "value_error"
+
+
+async def test_upload_document_rejects_upload_file_without_filename():
+    """The endpoint's defensive filename check returns its custom validation error."""
+    file = UploadFile(
+        file=BytesIO(_VALID_PDF),
+        filename="",
+        headers=Headers({"content-type": "application/pdf"}),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await upload_document(
+            document_data=DocumentCreate(
+                company_ticker="AAPL",
+                document_type=DocumentType.ANNUAL_REPORT,
+                year=2023,
+            ),
+            file=file,
+            background_tasks=BackgroundTasks(),
+            session=AsyncMock(),
+            user=MagicMock(id=1),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "File must have a filename"
 
 
 async def test_upload_document_unauthenticated(client: AsyncClient):
@@ -126,10 +162,12 @@ async def test_list_documents_returns_own_and_public_only(
     )
 
     assert response.status_code == 200
-    ids = {d["id"] for d in response.json()}
+    documents = response.json()
+    ids = {document["id"] for document in documents}
     assert own_doc.id in ids
     assert public_doc.id in ids
     assert other_doc.id not in ids
+    assert all(document["owner_id"] in {None, user.id} for document in documents)
 
 
 async def test_list_documents_unauthenticated(client: AsyncClient):
@@ -240,6 +278,11 @@ async def test_delete_own_document(
 
     assert response.status_code == 204
 
+    get_response = await client.get(
+        f"/documents/{doc.id}", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert get_response.status_code == 404
+
 
 async def test_delete_public_document_returns_403(
     client: AsyncClient,
@@ -257,6 +300,11 @@ async def test_delete_public_document_returns_403(
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Public documents cannot be deleted"
+
+    get_response = await client.get(
+        f"/documents/{public_doc.id}", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert get_response.status_code == 200
 
 
 async def test_delete_other_users_document_returns_404(
@@ -276,6 +324,13 @@ async def test_delete_other_users_document_returns_404(
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Document not found"
+
+    other_token = token_factory(other_user)
+    get_response = await client.get(
+        f"/documents/{other_doc.id}",
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert get_response.status_code == 200
 
 
 async def test_delete_nonexistent_document_returns_404(

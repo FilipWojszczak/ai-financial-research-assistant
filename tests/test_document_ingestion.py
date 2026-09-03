@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from financial_assistant.ai.document_ingestion import process_uploaded_document
-from financial_assistant.models.document import DocumentStatus
+from financial_assistant.models.document import Document, DocumentStatus
 
 
 def _session_context(session: MagicMock) -> MagicMock:
@@ -83,10 +83,11 @@ async def test_processing_failure_rolls_back_before_recording_failed_status(
 
     # Partial chunk data must be rolled back, while only the FAILED status is
     # committed through the clean session.
+    assert session_maker.call_count == 2
     processing_session.rollback.assert_awaited_once_with()
     processing_session.commit.assert_not_awaited()
     processing_session.get.assert_not_awaited()
-    status_session.get.assert_awaited_once()
+    status_session.get.assert_awaited_once_with(Document, 42)
     assert failed_document.status == DocumentStatus.FAILED
     status_session.commit.assert_awaited_once_with()
 
@@ -140,9 +141,58 @@ async def test_flush_failure_uses_fresh_session_to_record_failed_status(
         await process_uploaded_document(document_id=42, file_bytes=b"pdf")
 
     # Status lookup and commit must happen only through the fresh session.
+    assert session_maker.call_count == 2
     processing_session.rollback.assert_awaited_once_with()
     processing_session.get.assert_not_awaited()
     processing_session.commit.assert_not_awaited()
-    status_session.get.assert_awaited_once()
+    status_session.get.assert_awaited_once_with(Document, 42)
     assert failed_document.status == DocumentStatus.FAILED
     status_session.commit.assert_awaited_once_with()
+
+
+async def test_successful_processing_commits_completed_status(ingestion_data):
+    """Successful ingestion should commit COMPLETED without opening a second session."""
+    parent_chunks, child_chunks = ingestion_data
+    completed_document = MagicMock()
+    processing_session = MagicMock()
+    processing_session.flush = AsyncMock()
+    processing_session.rollback = AsyncMock()
+    processing_session.get = AsyncMock(return_value=completed_document)
+    processing_session.commit = AsyncMock()
+    session_maker = MagicMock(return_value=_session_context(processing_session))
+
+    with (
+        patch(
+            "financial_assistant.ai.document_ingestion.async_session_maker",
+            session_maker,
+        ),
+        patch(
+            "financial_assistant.ai.document_ingestion.load_pdf_documents",
+            return_value=[MagicMock()],
+        ),
+        patch(
+            "financial_assistant.ai.document_ingestion.split_into_parent_and_child_chunks",
+            return_value=(parent_chunks, child_chunks),
+        ),
+        patch(
+            "financial_assistant.ai.document_ingestion.generate_child_embeddings",
+            return_value=child_chunks,
+        ),
+        patch(
+            "financial_assistant.ai.document_ingestion.process_document_graph",
+            return_value=[],
+        ) as process_graph,
+        patch(
+            "financial_assistant.ai.document_ingestion.process_document_communities"
+        ) as process_communities,
+    ):
+        await process_uploaded_document(document_id=42, file_bytes=b"pdf")
+
+    session_maker.assert_called_once_with()
+    assert processing_session.flush.await_count == 2
+    processing_session.get.assert_awaited_once_with(Document, 42)
+    assert completed_document.status == DocumentStatus.COMPLETED
+    processing_session.commit.assert_awaited_once_with()
+    processing_session.rollback.assert_not_awaited()
+    process_graph.assert_awaited_once()
+    process_communities.assert_awaited_once_with(processing_session, 42, [])

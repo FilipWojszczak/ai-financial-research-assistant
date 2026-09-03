@@ -1,8 +1,12 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from financial_assistant.ai.document_ingestion import process_uploaded_document
+from financial_assistant.ai.document_ingestion import (
+    generate_child_embeddings,
+    process_uploaded_document,
+)
 from financial_assistant.models.document import Document, DocumentStatus
 
 
@@ -203,3 +207,187 @@ async def test_successful_processing_commits_completed_status(ingestion_data):
     processing_session.rollback.assert_not_awaited()
     process_graph.assert_awaited_once()
     process_communities.assert_awaited_once_with(processing_session, 42, [])
+
+
+async def test_generate_child_embeddings_rejects_empty_input():
+    """An empty embedding request should fail before contacting the provider."""
+    embeddings_model = MagicMock()
+    embeddings_model.aembed_documents = AsyncMock()
+
+    with (
+        patch(
+            "financial_assistant.ai.document_ingestion.embeddings_model",
+            embeddings_model,
+        ),
+        pytest.raises(ValueError, match="without child chunks"),
+    ):
+        await generate_child_embeddings([])
+
+    embeddings_model.aembed_documents.assert_not_awaited()
+
+
+async def test_generate_child_embeddings_rejects_count_mismatch():
+    """Every child chunk must receive exactly one embedding."""
+    child_chunks = [{"content": "child"}]
+
+    embeddings_model = MagicMock()
+    embeddings_model.aembed_documents = AsyncMock(return_value=[])
+
+    with (
+        patch(
+            "financial_assistant.ai.document_ingestion.embeddings_model",
+            embeddings_model,
+        ),
+        pytest.raises(ValueError, match="Embedding count does not match"),
+    ):
+        await generate_child_embeddings(child_chunks)
+
+    embeddings_model.aembed_documents.assert_awaited_once_with(["child"])
+    assert "embedding" not in child_chunks[0]
+
+
+@pytest.mark.parametrize(
+    ("parent_chunks", "child_chunks", "error_message"),
+    [
+        ([], [], "PDF produced no parent chunks"),
+        (
+            [{"chunk_index": 0, "content": "parent"}],
+            [],
+            "PDF produced no child chunks",
+        ),
+    ],
+)
+async def test_empty_chunk_results_mark_document_failed(
+    parent_chunks,
+    child_chunks,
+    error_message,
+    caplog,
+):
+    """A PDF that produces no usable chunks must not be marked COMPLETED."""
+    processing_session = MagicMock()
+    processing_session.rollback = AsyncMock()
+    processing_session.commit = AsyncMock()
+
+    failed_document = MagicMock()
+    status_session = MagicMock()
+    status_session.get = AsyncMock(return_value=failed_document)
+    status_session.commit = AsyncMock()
+    session_maker = MagicMock(
+        side_effect=[
+            _session_context(processing_session),
+            _session_context(status_session),
+        ]
+    )
+
+    with (
+        patch(
+            "financial_assistant.ai.document_ingestion.async_session_maker",
+            session_maker,
+        ),
+        patch(
+            "financial_assistant.ai.document_ingestion.load_pdf_documents",
+            return_value=[MagicMock()],
+        ),
+        patch(
+            "financial_assistant.ai.document_ingestion.split_into_parent_and_child_chunks",
+            return_value=(parent_chunks, child_chunks),
+        ),
+        patch(
+            "financial_assistant.ai.document_ingestion.generate_child_embeddings"
+        ) as generate_embeddings,
+    ):
+        await process_uploaded_document(document_id=42, file_bytes=b"pdf")
+
+    processing_session.rollback.assert_awaited_once_with()
+    processing_session.commit.assert_not_awaited()
+    generate_embeddings.assert_not_awaited()
+    assert failed_document.status == DocumentStatus.FAILED
+    status_session.commit.assert_awaited_once_with()
+    error_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Error processing document 42"
+    )
+    assert str(error_record.exc_info[1]) == error_message
+
+
+async def test_pdf_without_readable_pages_marks_document_failed(caplog):
+    """An empty PDF-loader result must stop ingestion before chunking."""
+    processing_session = MagicMock()
+    processing_session.rollback = AsyncMock()
+
+    failed_document = MagicMock()
+    status_session = MagicMock()
+    status_session.get = AsyncMock(return_value=failed_document)
+    status_session.commit = AsyncMock()
+    session_maker = MagicMock(
+        side_effect=[
+            _session_context(processing_session),
+            _session_context(status_session),
+        ]
+    )
+
+    with (
+        patch(
+            "financial_assistant.ai.document_ingestion.async_session_maker",
+            session_maker,
+        ),
+        patch(
+            "financial_assistant.ai.document_ingestion.load_pdf_documents",
+            return_value=[],
+        ),
+        patch(
+            "financial_assistant.ai.document_ingestion.split_into_parent_and_child_chunks"
+        ) as split_chunks,
+    ):
+        await process_uploaded_document(document_id=42, file_bytes=b"pdf")
+
+    processing_session.rollback.assert_awaited_once_with()
+    split_chunks.assert_not_called()
+    assert failed_document.status == DocumentStatus.FAILED
+    error_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Error processing document 42"
+    )
+    assert str(error_record.exc_info[1]) == "PDF contains no readable pages"
+
+
+async def test_cancellation_rolls_back_marks_failed_and_propagates(caplog):
+    """Cancellation should clean up state while remaining visible to the caller."""
+    processing_session = MagicMock()
+    processing_session.rollback = AsyncMock()
+
+    failed_document = MagicMock()
+    status_session = MagicMock()
+    status_session.get = AsyncMock(return_value=failed_document)
+    status_session.commit = AsyncMock()
+    session_maker = MagicMock(
+        side_effect=[
+            _session_context(processing_session),
+            _session_context(status_session),
+        ]
+    )
+
+    with (
+        patch(
+            "financial_assistant.ai.document_ingestion.async_session_maker",
+            session_maker,
+        ),
+        patch(
+            "financial_assistant.ai.document_ingestion.load_pdf_documents",
+            side_effect=asyncio.CancelledError,
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await process_uploaded_document(document_id=42, file_bytes=b"pdf")
+
+    processing_session.rollback.assert_awaited_once_with()
+    assert failed_document.status == DocumentStatus.FAILED
+    status_session.commit.assert_awaited_once_with()
+    cancellation_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Processing cancelled for document 42"
+    )
+    assert cancellation_record.exc_info is not None

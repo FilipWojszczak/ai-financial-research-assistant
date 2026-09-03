@@ -1,6 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,7 +65,6 @@ def _make_session(relationships: list) -> tuple[AsyncMock, list]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_generate_community_summary_parses_title_and_summary():
     """Correctly structured LLM response is split into title and summary."""
     mock_response = AIMessage(
@@ -83,7 +81,6 @@ async def test_generate_community_summary_parses_title_and_summary():
     assert summary == "Tim Cook leads Apple as CEO."
 
 
-@pytest.mark.asyncio
 async def test_generate_community_summary_falls_back_when_format_not_followed():
     """When the LLM ignores the TITLE:/SUMMARY: format, safe defaults are returned."""
     mock_response = AIMessage(content="Some unstructured response")
@@ -101,7 +98,6 @@ async def test_generate_community_summary_falls_back_when_format_not_followed():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_process_document_communities_returns_early_when_no_entities():
     """Empty entity list skips all processing including the DB query."""
     session = AsyncMock(spec=AsyncSession)
@@ -109,7 +105,6 @@ async def test_process_document_communities_returns_early_when_no_entities():
     session.execute.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_process_document_communities_returns_early_when_no_edges():
     """Entities with no relationships produce no graph edges and nothing is saved."""
     entities = [_make_entity(1, "Apple"), _make_entity(2, "Microsoft")]
@@ -120,7 +115,6 @@ async def test_process_document_communities_returns_early_when_no_edges():
     assert added_objects == []
 
 
-@pytest.mark.asyncio
 async def test_process_document_communities_saves_communities_and_memberships():
     """Two disconnected entity pairs produce two communities with correct memberships."""  # noqa: E501
     entities = [
@@ -171,7 +165,6 @@ async def test_process_document_communities_saves_communities_and_memberships():
     }
 
 
-@pytest.mark.asyncio
 async def test_process_document_communities_skips_singleton_communities():
     """An isolated entity forms a singleton community that is silently skipped."""
     entities = [
@@ -201,7 +194,6 @@ async def test_process_document_communities_skips_singleton_communities():
     assert len(memberships) == 2
 
 
-@pytest.mark.asyncio
 async def test_process_document_communities_uses_fallback_summary_on_llm_failure(
     caplog,
 ):
@@ -234,7 +226,6 @@ async def test_process_document_communities_uses_fallback_summary_on_llm_failure
     assert warning_record.exc_info is not None
 
 
-@pytest.mark.asyncio
 async def test_process_document_communities_uses_none_embedding_on_embed_failure():
     """Embedding API failure stores None and still persists the community."""
     entities = [_make_entity(1, "Apple"), _make_entity(2, "Tim Cook")]
@@ -258,7 +249,6 @@ async def test_process_document_communities_uses_none_embedding_on_embed_failure
     assert communities[0].embedding is None
 
 
-@pytest.mark.asyncio
 async def test_process_document_communities_falls_back_to_greedy_on_louvain_failure():
     """If Louvain raises, community detection continues with greedy modularity."""
     entities = [_make_entity(1, "Apple"), _make_entity(2, "Tim Cook")]

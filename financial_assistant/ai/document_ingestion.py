@@ -92,9 +92,18 @@ async def generate_child_embeddings(
     Generate embeddings for child chunks using GoogleGenerativeAIEmbeddings. This
     function takes the child chunks, extracts their content, and generates embeddings.
     """
+    if not child_chunks:
+        raise ValueError("Cannot generate embeddings without child chunks")
+
     # Extract the content from child chunks to generate embeddings
     texts = [chunk["content"] for chunk in child_chunks]
     embeddings = await embeddings_model.aembed_documents(texts)
+
+    if len(embeddings) != len(child_chunks):
+        raise ValueError(
+            "Embedding count does not match child chunk count: "
+            f"{len(embeddings)} != {len(child_chunks)}"
+        )
 
     # Attach the generated embeddings back to the child chunks
     for chunk, embedding in zip(child_chunks, embeddings, strict=True):
@@ -103,14 +112,36 @@ async def generate_child_embeddings(
     return child_chunks
 
 
+async def _mark_document_failed(document_id: int) -> None:
+    """Persist FAILED independently from the rolled-back processing transaction."""
+    try:
+        async with async_session_maker() as status_session:
+            document = await status_session.get(Document, document_id)
+            if document:
+                document.status = DocumentStatus.FAILED
+                await status_session.commit()
+    except Exception:
+        logger.exception(
+            "Failed to update status to FAILED for document %d", document_id
+        )
+
+
 async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None:
     try:
         async with async_session_maker() as session:
             try:
                 documents = await load_pdf_documents(file_bytes)
+                if not documents:
+                    raise ValueError("PDF contains no readable pages")
+
                 parent_chunks, child_chunks = split_into_parent_and_child_chunks(
                     documents
                 )
+                if not parent_chunks:
+                    raise ValueError("PDF produced no parent chunks")
+                if not child_chunks:
+                    raise ValueError("PDF produced no child chunks")
+
                 embedded_children = await generate_child_embeddings(child_chunks)
 
                 # Save parent_chunks and embedded_children to the database
@@ -154,23 +185,17 @@ async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None
                 if document:
                     document.status = DocumentStatus.COMPLETED
                 await session.commit()
-            except Exception:
-                # Discard all partially persisted ingestion data and restore the session
-                # to a usable state before it is closed.
+            except BaseException:
+                # Roll back failures and cancellation before closing the session.
                 await session.rollback()
                 raise
+    except asyncio.CancelledError:
+        logger.warning(
+            "Processing cancelled for document %d", document_id, exc_info=True
+        )
+        await _mark_document_failed(document_id)
+        raise
     except Exception:
-        # Log the error and update document status to FAILED in an independent session.
-        # The processing session may have failed at flush/commit time and must not be
-        # reused for status persistence.
+        # Record FAILED independently because the processing session may be unusable.
         logger.exception("Error processing document %d", document_id)
-        try:
-            async with async_session_maker() as status_session:
-                document = await status_session.get(Document, document_id)
-                if document:
-                    document.status = DocumentStatus.FAILED
-                    await status_session.commit()
-        except Exception:
-            logger.exception(
-                "Failed to update status to FAILED for document %d", document_id
-            )
+        await _mark_document_failed(document_id)

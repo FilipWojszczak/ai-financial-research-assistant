@@ -97,15 +97,22 @@ async def process_document_graph(
     deduplicate entities by name, and persist everything to the database.
     Returns the saved Entity objects.
     """
+    if not parent_chunks:
+        raise ValueError("Cannot extract a graph without parent chunks")
+
     # entity_name_lower -> Entity (deduplication within a document)
     entity_map: dict[str, Entity] = {}
     # Collect relationship data until entity IDs are available
     pending_relationships: list[dict] = []
+    failed_extractions = 0
+    last_extraction_error: Exception | None = None
 
     for parent_chunk in parent_chunks:
         try:
             result = await extract_entities_and_relationships(parent_chunk.content)
-        except Exception:
+        except Exception as exc:
+            failed_extractions += 1
+            last_extraction_error = exc
             logger.warning(
                 "Failed to extract entities from chunk %d, skipping",
                 parent_chunk.id,
@@ -135,6 +142,11 @@ async def process_document_graph(
                     "chunk_id": parent_chunk.id,
                 }
             )
+
+    if failed_extractions == len(parent_chunks):
+        raise RuntimeError(
+            f"Entity extraction failed for all {len(parent_chunks)} parent chunks"
+        ) from last_extraction_error
 
     # Flush so entities receive their DB-assigned IDs
     await session.flush()

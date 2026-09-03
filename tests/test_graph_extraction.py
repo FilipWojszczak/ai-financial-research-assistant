@@ -185,7 +185,7 @@ async def test_process_document_graph_skips_unknown_relationship_entities():
 
 
 @pytest.mark.asyncio
-async def test_process_document_graph_tolerates_chunk_extraction_failure():
+async def test_process_document_graph_tolerates_chunk_extraction_failure(caplog):
     """If a chunk's LLM call raises, processing continues with remaining chunks."""
     chunk_a = _make_chunk(1)
     chunk_b = _make_chunk(2)
@@ -207,3 +207,9 @@ async def test_process_document_graph_tolerates_chunk_extraction_failure():
 
     assert len(entities) == 1
     assert entities[0].name == "Microsoft"
+    warning_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Failed to extract entities from chunk 1, skipping"
+    )
+    assert warning_record.exc_info is not None

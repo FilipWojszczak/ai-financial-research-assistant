@@ -202,7 +202,9 @@ async def test_process_document_communities_skips_singleton_communities():
 
 
 @pytest.mark.asyncio
-async def test_process_document_communities_uses_fallback_summary_on_llm_failure():
+async def test_process_document_communities_uses_fallback_summary_on_llm_failure(
+    caplog,
+):
     """LLM failure during summarisation falls back to a generic title and summary."""
     entities = [_make_entity(1, "Apple"), _make_entity(2, "Tim Cook")]
     relationships = [_make_relationship(1, 2, "CEO_OF")]
@@ -224,6 +226,12 @@ async def test_process_document_communities_uses_fallback_summary_on_llm_failure
     assert len(communities) == 1
     assert communities[0].title == "Community of 2 entities"
     assert communities[0].summary == "A cluster of 2 related financial entities."
+    warning_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Failed to summarise a community for document 1"
+    )
+    assert warning_record.exc_info is not None
 
 
 @pytest.mark.asyncio

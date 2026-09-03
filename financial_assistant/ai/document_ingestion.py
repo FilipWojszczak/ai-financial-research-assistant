@@ -159,19 +159,18 @@ async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None
                 # to a usable state before it is closed.
                 await session.rollback()
                 raise
-    except Exception as e:
+    except Exception:
         # Log the error and update document status to FAILED in an independent session.
         # The processing session may have failed at flush/commit time and must not be
         # reused for status persistence.
-        logger.error(f"Error processing document {document_id}: {e!s}")
+        logger.exception("Error processing document %d", document_id)
         try:
             async with async_session_maker() as status_session:
                 document = await status_session.get(Document, document_id)
                 if document:
                     document.status = DocumentStatus.FAILED
                     await status_session.commit()
-        except Exception as db_error:
-            logger.error(
-                f"Failed to update status to FAILED for document "
-                f"{document_id}: {db_error!s}"
+        except Exception:
+            logger.exception(
+                "Failed to update status to FAILED for document %d", document_id
             )

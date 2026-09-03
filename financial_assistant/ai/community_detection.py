@@ -112,7 +112,10 @@ async def process_document_communities(
     try:
         community_sets = nx.community.louvain_communities(graph, seed=42)
     except Exception:
-        logger.warning("Louvain failed, falling back to greedy modularity communities")
+        logger.warning(
+            "Louvain failed, falling back to greedy modularity communities",
+            exc_info=True,
+        )
         community_sets = list(nx.community.greedy_modularity_communities(graph))
 
     rel_lookup: dict[frozenset[int], list[EntityRelationship]] = {}
@@ -140,7 +143,9 @@ async def process_document_communities(
             )
         except Exception:
             logger.warning(
-                "Failed to summarise a community for document %d", document_id
+                "Failed to summarise a community for document %d",
+                document_id,
+                exc_info=True,
             )
             n = len(community_entities)
             title = f"Community of {n} entities"
@@ -157,7 +162,9 @@ async def process_document_communities(
         embeddings = await _embeddings_model.aembed_documents(summaries)
     except Exception:
         logger.warning(
-            "Failed to embed community summaries for document %d", document_id
+            "Failed to embed community summaries for document %d",
+            document_id,
+            exc_info=True,
         )
         embeddings = [None] * len(summaries)
 

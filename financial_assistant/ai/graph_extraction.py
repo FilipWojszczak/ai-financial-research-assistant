@@ -107,7 +107,9 @@ async def process_document_graph(
             result = await extract_entities_and_relationships(parent_chunk.content)
         except Exception:
             logger.warning(
-                "Failed to extract entities from chunk %d, skipping", parent_chunk.id
+                "Failed to extract entities from chunk %d, skipping",
+                parent_chunk.id,
+                exc_info=True,
             )
             continue
 

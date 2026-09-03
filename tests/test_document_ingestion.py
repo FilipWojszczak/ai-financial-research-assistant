@@ -32,6 +32,7 @@ def ingestion_data():
 
 async def test_processing_failure_rolls_back_before_recording_failed_status(
     ingestion_data,
+    caplog,
 ):
     """A late failure should roll back partial data and persist FAILED separately."""
     parent_chunks, child_chunks = ingestion_data
@@ -90,6 +91,12 @@ async def test_processing_failure_rolls_back_before_recording_failed_status(
     status_session.get.assert_awaited_once_with(Document, 42)
     assert failed_document.status == DocumentStatus.FAILED
     status_session.commit.assert_awaited_once_with()
+    error_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Error processing document 42"
+    )
+    assert error_record.exc_info is not None
 
 
 async def test_flush_failure_uses_fresh_session_to_record_failed_status(

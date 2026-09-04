@@ -3,8 +3,10 @@ services:
     image: paradedb/paradedb:0.23.4-pg17
     # Automatically restarts the container after a system reboot or database crash
     restart: always
-    env_file:
-      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Set in .env}
     ports:
       - "5433:5432"
     volumes:
@@ -19,9 +21,9 @@ services:
     image: rabbitmq:4.2-management-alpine
     restart: always
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set in .env}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set in .env}
-      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST:?Set in .env}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set in .env}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:?Set in .env}
     ports:
       - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"

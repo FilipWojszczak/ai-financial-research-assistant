@@ -1,7 +1,5 @@
 import asyncio
 import logging
-import tempfile
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +9,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from ..core.db import async_session_maker
+from ..core.document_storage import document_file_path
 from ..models.document import ChildChunk, Document, DocumentStatus, ParentChunk
 from .community_detection import process_document_communities
 from .graph_extraction import process_document_graph
@@ -22,26 +21,10 @@ embeddings_model = GoogleGenerativeAIEmbeddings(
 )
 
 
-async def load_pdf_documents(file_bytes: bytes) -> list[LangchainDocument]:
-    """
-    Load PDF documents from bytes using PyPDFLoader. This function writes the bytes
-    to a temporary file and then loads it.
-    """
-    # Create a safe temporary file path for the uploaded PDF
-    temp_dir = Path(tempfile.gettempdir())
-    temp_path = temp_dir / f"{uuid.uuid4()}.pdf"
-
-    try:
-        # Write the uploaded file bytes to the temporary file in a separate thread
-        await asyncio.to_thread(temp_path.write_bytes, file_bytes)
-
-        # Load the PDF document using PyPDFLoader in a separate thread
-        loader = PyPDFLoader(str(temp_path))
-        documents = await asyncio.to_thread(loader.load)
-        return documents
-    finally:
-        # Clean up the temporary file in a separate thread
-        await asyncio.to_thread(temp_path.unlink, missing_ok=True)
+async def load_pdf_documents(file_path: Path) -> list[LangchainDocument]:
+    """Load a stored PDF without blocking the application's event loop."""
+    loader = PyPDFLoader(str(file_path))
+    return await asyncio.to_thread(loader.load)
 
 
 def split_into_parent_and_child_chunks(
@@ -126,11 +109,11 @@ async def _mark_document_failed(document_id: int) -> None:
         )
 
 
-async def process_uploaded_document(document_id: int, file_bytes: bytes) -> None:
+async def process_uploaded_document(document_id: int) -> None:
     try:
         async with async_session_maker() as session:
             try:
-                documents = await load_pdf_documents(file_bytes)
+                documents = await load_pdf_documents(document_file_path(document_id))
                 if not documents:
                     raise ValueError("PDF contains no readable pages")
 

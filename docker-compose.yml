@@ -42,8 +42,12 @@ services:
       # Mounts code to /workspace.
       # The :cached flag optimizes the filesystem on macOS; it's natively ignored on Ubuntu, but good practice.
       - .:/workspace:cached
+      # Source PDFs survive app restarts and are shared with the future worker.
+      - document_storage:/var/lib/financial-assistant/documents
     env_file:
       - .env
+    environment:
+      DOCUMENT_STORAGE_PATH: /var/lib/financial-assistant/documents
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -58,3 +62,4 @@ services:
 volumes:
   postgres_vector_data:
   rabbitmq_data:
+  document_storage:

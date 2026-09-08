@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...ai.document_ingestion import process_uploaded_document
 from ...core.db import get_session
+from ...core.document_storage import delete_document_file, store_document_file
 from ...models import Document, User
 from ...schemas.document import DocumentCreate, DocumentRead
 from ..dependencies.auth import get_current_user
@@ -62,12 +63,21 @@ async def upload_document(
         owner_id=owner_id,
     )
     session.add(db_document)
-    await session.commit()
+    stored = False
+    try:
+        # Flush assigns the database ID used as the storage key without committing yet.
+        await session.flush()
+        await store_document_file(db_document.id, file_bytes)
+        stored = True
+        await session.commit()
+    except BaseException:
+        await session.rollback()
+        if stored:
+            await delete_document_file(db_document.id)
+        raise
     await session.refresh(db_document)
 
-    background_tasks.add_task(
-        process_uploaded_document, document_id=db_document.id, file_bytes=file_bytes
-    )
+    background_tasks.add_task(process_uploaded_document, document_id=db_document.id)
 
     return db_document
 
@@ -141,3 +151,4 @@ async def delete_document(
         raise HTTPException(status_code=404, detail="Document not found")
     await session.delete(document)
     await session.commit()
+    await delete_document_file(document_id)

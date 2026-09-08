@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from pathlib import Path
 from urllib.parse import quote
 
 from pydantic import SecretStr, computed_field
@@ -27,6 +28,8 @@ class Settings(BaseSettings):
     rabbitmq_port: int | None = 5672
 
     rabbitmq_url_override: SecretStr | None = None
+
+    document_storage_path: Path = Path("data/documents")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

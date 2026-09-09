@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -84,7 +85,7 @@ async def test_processing_failure_rolls_back_before_recording_failed_status(
             new=AsyncMock(side_effect=RuntimeError("graph processing failed")),
         ),
     ):
-        await process_uploaded_document(document_id=42, file_bytes=b"pdf")
+        await process_uploaded_document(document_id=42)
 
     # Partial chunk data must be rolled back, while only the FAILED status is
     # committed through the clean session.
@@ -149,7 +150,7 @@ async def test_flush_failure_uses_fresh_session_to_record_failed_status(
             new=AsyncMock(return_value=child_chunks),
         ),
     ):
-        await process_uploaded_document(document_id=42, file_bytes=b"pdf")
+        await process_uploaded_document(document_id=42)
 
     # Status lookup and commit must happen only through the fresh session.
     assert session_maker.call_count == 2
@@ -178,9 +179,13 @@ async def test_successful_processing_commits_completed_status(ingestion_data):
             session_maker,
         ),
         patch(
+            "financial_assistant.ai.document_ingestion.document_file_path",
+            return_value=Path("/shared/documents/42.pdf"),
+        ),
+        patch(
             "financial_assistant.ai.document_ingestion.load_pdf_documents",
             return_value=[MagicMock()],
-        ),
+        ) as load_pdf,
         patch(
             "financial_assistant.ai.document_ingestion.split_into_parent_and_child_chunks",
             return_value=(parent_chunks, child_chunks),
@@ -197,7 +202,8 @@ async def test_successful_processing_commits_completed_status(ingestion_data):
             "financial_assistant.ai.document_ingestion.process_document_communities"
         ) as process_communities,
     ):
-        await process_uploaded_document(document_id=42, file_bytes=b"pdf")
+        await process_uploaded_document(document_id=42)
+    load_pdf.assert_awaited_once_with(Path("/shared/documents/42.pdf"))
 
     session_maker.assert_called_once_with()
     assert processing_session.flush.await_count == 2
@@ -296,7 +302,7 @@ async def test_empty_chunk_results_mark_document_failed(
             "financial_assistant.ai.document_ingestion.generate_child_embeddings"
         ) as generate_embeddings,
     ):
-        await process_uploaded_document(document_id=42, file_bytes=b"pdf")
+        await process_uploaded_document(document_id=42)
 
     processing_session.rollback.assert_awaited_once_with()
     processing_session.commit.assert_not_awaited()
@@ -340,7 +346,7 @@ async def test_pdf_without_readable_pages_marks_document_failed(caplog):
             "financial_assistant.ai.document_ingestion.split_into_parent_and_child_chunks"
         ) as split_chunks,
     ):
-        await process_uploaded_document(document_id=42, file_bytes=b"pdf")
+        await process_uploaded_document(document_id=42)
 
     processing_session.rollback.assert_awaited_once_with()
     split_chunks.assert_not_called()
@@ -380,7 +386,7 @@ async def test_cancellation_rolls_back_marks_failed_and_propagates(caplog):
         ),
         pytest.raises(asyncio.CancelledError),
     ):
-        await process_uploaded_document(document_id=42, file_bytes=b"pdf")
+        await process_uploaded_document(document_id=42)
 
     processing_session.rollback.assert_awaited_once_with()
     assert failed_document.status == DocumentStatus.FAILED

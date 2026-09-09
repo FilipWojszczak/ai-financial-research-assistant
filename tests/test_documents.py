@@ -12,6 +12,8 @@ from financial_assistant.models.document import DocumentStatus, DocumentType
 from financial_assistant.schemas.document import DocumentCreate
 
 _PROCESS_TASK = "financial_assistant.api.routers.documents.process_uploaded_document"
+_STORE_FILE = "financial_assistant.api.routers.documents.store_document_file"
+_DELETE_FILE = "financial_assistant.api.routers.documents.delete_document_file"
 
 _VALID_PDF = b"%PDF fake content"
 
@@ -25,7 +27,10 @@ async def test_upload_document_private(
     user = await user_factory(email="uploader@example.com")
     token = token_factory(user)
 
-    with patch(_PROCESS_TASK, new_callable=AsyncMock) as mock_process:
+    with (
+        patch(_PROCESS_TASK, new_callable=AsyncMock) as mock_process,
+        patch(_STORE_FILE, new_callable=AsyncMock) as mock_store,
+    ):
         response = await client.post(
             "/documents/",
             data={"company_ticker": "AAPL", "document_type": "10-K", "year": 2023},
@@ -41,7 +46,8 @@ async def test_upload_document_private(
     assert data["year"] == 2023
     assert data["status"] == DocumentStatus.PROCESSING
     assert data["owner_id"] == user.id
-    mock_process.assert_awaited_once_with(document_id=data["id"], file_bytes=_VALID_PDF)
+    mock_store.assert_awaited_once_with(data["id"], _VALID_PDF)
+    mock_process.assert_awaited_once_with(document_id=data["id"])
 
 
 async def test_upload_document_public(
@@ -50,7 +56,10 @@ async def test_upload_document_public(
     user = await user_factory(email="public_uploader@example.com")
     token = token_factory(user)
 
-    with patch(_PROCESS_TASK, new_callable=AsyncMock) as mock_process:
+    with (
+        patch(_PROCESS_TASK, new_callable=AsyncMock) as mock_process,
+        patch(_STORE_FILE, new_callable=AsyncMock) as mock_store,
+    ):
         response = await client.post(
             "/documents/",
             data={
@@ -65,7 +74,8 @@ async def test_upload_document_public(
     assert response.status_code == 202
     data = response.json()
     assert data["owner_id"] is None
-    mock_process.assert_awaited_once_with(document_id=data["id"], file_bytes=_VALID_PDF)
+    mock_store.assert_awaited_once_with(data["id"], _VALID_PDF)
+    mock_process.assert_awaited_once_with(document_id=data["id"])
 
 
 async def test_upload_document_wrong_content_type(
@@ -127,6 +137,49 @@ async def test_upload_document_rejects_upload_file_without_filename():
 
     assert exc_info.value.status_code == 422
     assert exc_info.value.detail == "File must have a filename"
+
+
+async def test_upload_commit_failure_rolls_back_and_removes_stored_pdf():
+    """A failed metadata commit must not leave an orphaned source PDF."""
+    file = UploadFile(
+        file=BytesIO(_VALID_PDF),
+        filename="report.pdf",
+        headers=Headers({"content-type": "application/pdf"}),
+    )
+    session = MagicMock()
+
+    async def assign_document_id():
+        session.add.call_args.args[0].id = 42
+
+    session.flush = AsyncMock(side_effect=assign_document_id)
+    session.commit = AsyncMock(side_effect=RuntimeError("commit failed"))
+    session.rollback = AsyncMock()
+    session.refresh = AsyncMock()
+    background_tasks = BackgroundTasks()
+
+    with (
+        patch(_STORE_FILE, new_callable=AsyncMock) as mock_store,
+        patch(_DELETE_FILE, new_callable=AsyncMock) as mock_delete,
+        pytest.raises(RuntimeError, match="commit failed"),
+    ):
+        await upload_document(
+            document_data=DocumentCreate(
+                company_ticker="AAPL",
+                document_type=DocumentType.ANNUAL_REPORT,
+                year=2023,
+            ),
+            file=file,
+            background_tasks=background_tasks,
+            session=session,
+            user=MagicMock(id=1),
+        )
+
+    session.flush.assert_awaited_once_with()
+    mock_store.assert_awaited_once_with(42, _VALID_PDF)
+    session.rollback.assert_awaited_once_with()
+    mock_delete.assert_awaited_once_with(42)
+    session.refresh.assert_not_awaited()
+    assert not background_tasks.tasks
 
 
 async def test_upload_document_unauthenticated(client: AsyncClient):
@@ -272,11 +325,13 @@ async def test_delete_own_document(
     token = token_factory(user)
     doc = await document_factory(owner_id=user.id)
 
-    response = await client.delete(
-        f"/documents/{doc.id}", headers={"Authorization": f"Bearer {token}"}
-    )
+    with patch(_DELETE_FILE, new_callable=AsyncMock) as mock_delete:
+        response = await client.delete(
+            f"/documents/{doc.id}", headers={"Authorization": f"Bearer {token}"}
+        )
 
     assert response.status_code == 204
+    mock_delete.assert_awaited_once_with(doc.id)
 
     get_response = await client.get(
         f"/documents/{doc.id}", headers={"Authorization": f"Bearer {token}"}

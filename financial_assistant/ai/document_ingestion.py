@@ -7,6 +7,8 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document as LangchainDocument
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf.errors import PdfReadError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..core.db import async_session_maker
 from ..core.document_storage import document_file_path
@@ -21,10 +23,22 @@ embeddings_model = GoogleGenerativeAIEmbeddings(
 )
 
 
+class InvalidDocumentError(ValueError):
+    """The source PDF cannot be ingested by retrying the same input."""
+
+
 async def load_pdf_documents(file_path: Path) -> list[LangchainDocument]:
     """Load a stored PDF without blocking the application's event loop."""
-    loader = PyPDFLoader(str(file_path))
-    return await asyncio.to_thread(loader.load)
+
+    def load():
+        # Construct and run the loader in the worker thread, as construction may inspect
+        # the filesystem.
+        return PyPDFLoader(str(file_path)).load()
+
+    try:
+        return await asyncio.to_thread(load)
+    except (FileNotFoundError, PdfReadError, ValueError) as exc:
+        raise InvalidDocumentError(f"Cannot read source PDF: {file_path.name}") from exc
 
 
 def split_into_parent_and_child_chunks(
@@ -95,83 +109,105 @@ async def generate_child_embeddings(
     return child_chunks
 
 
-async def _mark_document_failed(document_id: int) -> None:
-    """Persist FAILED independently from the rolled-back processing transaction."""
+async def _mark_document_failed(
+    document_id: int,
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> None:
+    """Best-effort terminal status update after the attempt has rolled back."""
+    factory = session_factory if session_factory is not None else async_session_maker
     try:
-        async with async_session_maker() as status_session:
-            document = await status_session.get(Document, document_id)
-            if document:
+        async with factory() as status_session:
+            # Wait for a competing attempt and inspect its committed status. A late
+            # failure must never overwrite another attempt's COMPLETED result.
+            document = await status_session.get(
+                Document, document_id, with_for_update=True
+            )
+            if document and document.status == DocumentStatus.PROCESSING:
                 document.status = DocumentStatus.FAILED
                 await status_session.commit()
     except Exception:
+        # A database outage can prevent this update; stale-job reconciliation will
+        # be needed in the operations stage of the migration.
         logger.exception(
             "Failed to update status to FAILED for document %d", document_id
         )
 
 
+async def ingest_document(
+    document_id: int,
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> None:
+    """Run one transactional attempt; propagate failures to the caller."""
+    factory = session_factory if session_factory is not None else async_session_maker
+    async with factory() as session:
+        try:
+            # Hold the row lock through the commit. Duplicate deliveries wait, then
+            # see the first attempt's result. A crash releases the lock on disconnect.
+            document = await session.get(Document, document_id, with_for_update=True)
+            if document is None or document.status != DocumentStatus.PROCESSING:
+                return
+
+            documents = await load_pdf_documents(document_file_path(document_id))
+            if not documents:
+                raise InvalidDocumentError("PDF contains no readable pages")
+
+            parent_chunks, child_chunks = split_into_parent_and_child_chunks(documents)
+            if not parent_chunks:
+                raise InvalidDocumentError("PDF produced no parent chunks")
+            if not child_chunks:
+                raise InvalidDocumentError("PDF produced no child chunks")
+
+            embedded_children = await generate_child_embeddings(child_chunks)
+
+            # Save parent_chunks and embedded_children to the database
+            db_parents = [
+                ParentChunk(
+                    chunk_index=parent["chunk_index"],
+                    content=parent["content"],
+                    document_id=document_id,
+                )
+                for parent in parent_chunks
+            ]
+            session.add_all(db_parents)
+            await session.flush()
+
+            db_children = []
+            for child in embedded_children:
+                # Find the corresponding parent chunk object in the database using
+                # the parent_index from the child chunk data
+                parent_object = db_parents[child["parent_index"]]
+                db_children.append(
+                    ChildChunk(
+                        chunk_index=child["chunk_index"],
+                        content=child["content"],
+                        embedding=child["embedding"],
+                        # Link the child to the database parent ID, not its
+                        # in-memory parent_index.
+                        parent_id=parent_object.id,
+                    )
+                )
+            session.add_all(db_children)
+            await session.flush()
+
+            # Extract entities/relationships and build the knowledge graph
+            entities = await process_document_graph(session, document_id, db_parents)
+            await process_document_communities(session, document_id, entities)
+
+            # Update document status to COMPLETED
+            document.status = DocumentStatus.COMPLETED
+            await session.commit()
+        except BaseException:
+            # Includes cancellation: partial chunks and graph data must roll back.
+            await session.rollback()
+            raise
+
+
 async def process_uploaded_document(document_id: int) -> None:
+    """Compatibility entry point for FastAPI until the API cutover stage."""
     try:
-        async with async_session_maker() as session:
-            try:
-                documents = await load_pdf_documents(document_file_path(document_id))
-                if not documents:
-                    raise ValueError("PDF contains no readable pages")
-
-                parent_chunks, child_chunks = split_into_parent_and_child_chunks(
-                    documents
-                )
-                if not parent_chunks:
-                    raise ValueError("PDF produced no parent chunks")
-                if not child_chunks:
-                    raise ValueError("PDF produced no child chunks")
-
-                embedded_children = await generate_child_embeddings(child_chunks)
-
-                # Save parent_chunks and embedded_children to the database
-                db_parents = [
-                    ParentChunk(
-                        chunk_index=parent["chunk_index"],
-                        content=parent["content"],
-                        document_id=document_id,
-                    )
-                    for parent in parent_chunks
-                ]
-                session.add_all(db_parents)
-                await session.flush()
-
-                db_children = []
-                for child in embedded_children:
-                    # Find the corresponding parent chunk object in the database using
-                    # the parent_index from the child chunk data
-                    parent_object = db_parents[child["parent_index"]]
-                    db_children.append(
-                        ChildChunk(
-                            chunk_index=child["chunk_index"],
-                            content=child["content"],
-                            embedding=child["embedding"],
-                            # Link the child to the database parent ID, not its
-                            # in-memory parent_index.
-                            parent_id=parent_object.id,
-                        )
-                    )
-                session.add_all(db_children)
-                await session.flush()
-
-                # Extract entities/relationships and build the knowledge graph
-                entities = await process_document_graph(
-                    session, document_id, db_parents
-                )
-                await process_document_communities(session, document_id, entities)
-
-                # Update document status to COMPLETED
-                document = await session.get(Document, document_id)
-                if document:
-                    document.status = DocumentStatus.COMPLETED
-                await session.commit()
-            except BaseException:
-                # Roll back failures and cancellation before closing the session.
-                await session.rollback()
-                raise
+        await ingest_document(document_id)
     except asyncio.CancelledError:
         logger.warning(
             "Processing cancelled for document %d", document_id, exc_info=True
@@ -179,6 +215,5 @@ async def process_uploaded_document(document_id: int) -> None:
         await _mark_document_failed(document_id)
         raise
     except Exception:
-        # Record FAILED independently because the processing session may be unusable.
         logger.exception("Error processing document %d", document_id)
         await _mark_document_failed(document_id)

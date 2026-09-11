@@ -1,8 +1,10 @@
 import asyncio
+from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from celery.exceptions import Retry
+from celery.result import EagerResult
 
 from financial_assistant.ai.document_ingestion import (
     InvalidDocumentError,
@@ -25,6 +27,29 @@ _TASK_MODULE = "financial_assistant.tasks.document_ingestion"
 _PIPELINE_MODULE = "financial_assistant.ai.document_ingestion"
 
 
+class EagerCeleryTask(Protocol):
+    """Celery task proxy API exercised by this module's tests."""
+
+    name: str
+    acks_late: bool
+    reject_on_worker_lost: bool
+    acks_on_failure_or_timeout: bool
+
+    def _get_current_object(self) -> object: ...
+
+    def apply(
+        self,
+        args: tuple[object, ...] | None = None,
+        *,
+        throw: bool = False,
+        retries: int | None = None,
+    ) -> EagerResult: ...
+
+
+# Celery returns a runtime task proxy; its task attributes are not inferred.
+ingest_task = cast(EagerCeleryTask, ingest_document_task)
+
+
 @pytest.fixture(autouse=True)
 def close_task_loop():
     yield
@@ -33,19 +58,16 @@ def close_task_loop():
 
 def test_task_is_registered_with_delivery_guarantees():
     celery_app.loader.import_default_modules()
-    assert (
-        celery_app.tasks[ingest_document_task.name]
-        is ingest_document_task._get_current_object()
-    )
-    assert ingest_document_task.acks_late is True
-    assert ingest_document_task.reject_on_worker_lost is True
-    assert ingest_document_task.acks_on_failure_or_timeout is True
+    assert celery_app.tasks[ingest_task.name] is ingest_task._get_current_object()
+    assert ingest_task.acks_late is True
+    assert ingest_task.reject_on_worker_lost is True
+    assert ingest_task.acks_on_failure_or_timeout is True
     assert celery_app.conf.worker_prefetch_multiplier == 1
 
 
 def test_successful_task_passes_only_document_id_to_attempt():
     with patch(f"{_TASK_MODULE}._run_attempt", new_callable=AsyncMock) as attempt:
-        result = ingest_document_task.apply(args=(42,), throw=True)
+        result = ingest_task.apply(args=(42,), throw=True)
     assert result.successful()
     attempt.assert_awaited_once_with(42, final_attempt=False)
 
@@ -57,7 +79,7 @@ def test_retryable_errors_schedule_bounded_backoff(retries, delay):
         patch(f"{_TASK_MODULE}._run_attempt", new=AsyncMock(side_effect=error)),
         pytest.raises(Retry) as retry,
     ):
-        ingest_document_task.apply(args=(42,), retries=retries, throw=True)
+        ingest_task.apply(args=(42,), retries=retries, throw=True)
     assert retry.value.when == delay
     assert retry.value.exc is error
 
@@ -66,7 +88,7 @@ def test_persistent_error_stops_after_four_attempts():
     attempt = AsyncMock(side_effect=ConnectionError("provider unavailable"))
     with patch(f"{_TASK_MODULE}._run_attempt", new=attempt):
         # Celery eager execution follows retries synchronously, without RabbitMQ.
-        result = ingest_document_task.apply(args=(42,), throw=False)
+        result = ingest_task.apply(args=(42,), throw=False)
     assert result.failed()
     assert attempt.await_count == 4
     assert [call.kwargs["final_attempt"] for call in attempt.await_args_list] == [
@@ -83,7 +105,7 @@ def test_invalid_pdf_is_not_retried():
         patch(f"{_TASK_MODULE}._run_attempt", new=attempt),
         pytest.raises(InvalidDocumentError),
     ):
-        ingest_document_task.apply(args=(42,), throw=True)
+        ingest_task.apply(args=(42,), throw=True)
     assert attempt.await_count == 1
 
 
@@ -93,7 +115,7 @@ def test_invalid_message_is_rejected_before_opening_resources(document_id):
         patch(f"{_TASK_MODULE}._run_attempt", new_callable=AsyncMock) as attempt,
         pytest.raises(ValueError, match="positive integer"),
     ):
-        ingest_document_task.apply(args=(document_id,), throw=True)
+        ingest_task.apply(args=(document_id,), throw=True)
     attempt.assert_not_called()
 
 
@@ -104,8 +126,8 @@ def test_sequential_tasks_share_worker_event_loop():
         loops.append(asyncio.get_running_loop())
 
     with patch(f"{_TASK_MODULE}._run_attempt", side_effect=attempt):
-        ingest_document_task.apply(args=(42,), throw=True)
-        ingest_document_task.apply(args=(43,), throw=True)
+        ingest_task.apply(args=(42,), throw=True)
+        ingest_task.apply(args=(43,), throw=True)
     assert loops[0] is loops[1]
     close_worker_runner()
     assert loops[0].is_closed()

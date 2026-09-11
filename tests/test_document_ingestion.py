@@ -42,12 +42,14 @@ async def test_processing_failure_rolls_back_before_recording_failed_status(
     """A late failure should roll back partial data and persist FAILED separately."""
     parent_chunks, child_chunks = ingestion_data
     processing_session = MagicMock()
+    processing_session.get = AsyncMock(
+        return_value=MagicMock(status=DocumentStatus.PROCESSING)
+    )
     processing_session.flush = AsyncMock()
     processing_session.rollback = AsyncMock()
     processing_session.commit = AsyncMock()
-    processing_session.get = AsyncMock()
 
-    failed_document = MagicMock()
+    failed_document = MagicMock(status=DocumentStatus.PROCESSING)
     status_session = MagicMock()
     status_session.get = AsyncMock(return_value=failed_document)
     status_session.commit = AsyncMock()
@@ -92,8 +94,8 @@ async def test_processing_failure_rolls_back_before_recording_failed_status(
     assert session_maker.call_count == 2
     processing_session.rollback.assert_awaited_once_with()
     processing_session.commit.assert_not_awaited()
-    processing_session.get.assert_not_awaited()
-    status_session.get.assert_awaited_once_with(Document, 42)
+    processing_session.get.assert_awaited_once_with(Document, 42, with_for_update=True)
+    status_session.get.assert_awaited_once_with(Document, 42, with_for_update=True)
     assert failed_document.status == DocumentStatus.FAILED
     status_session.commit.assert_awaited_once_with()
     error_record = next(
@@ -110,13 +112,15 @@ async def test_flush_failure_uses_fresh_session_to_record_failed_status(
     """A flush failure should not reuse the failed session to persist FAILED."""
     parent_chunks, child_chunks = ingestion_data
     processing_session = MagicMock()
+    processing_session.get = AsyncMock(
+        return_value=MagicMock(status=DocumentStatus.PROCESSING)
+    )
     # A failed flush leaves a real SQLAlchemy session unusable until it is rolled back.
     processing_session.flush = AsyncMock(side_effect=RuntimeError("flush failed"))
     processing_session.rollback = AsyncMock()
     processing_session.commit = AsyncMock()
-    processing_session.get = AsyncMock()
 
-    failed_document = MagicMock()
+    failed_document = MagicMock(status=DocumentStatus.PROCESSING)
     status_session = MagicMock()
     status_session.get = AsyncMock(return_value=failed_document)
     status_session.commit = AsyncMock()
@@ -155,9 +159,9 @@ async def test_flush_failure_uses_fresh_session_to_record_failed_status(
     # Status lookup and commit must happen only through the fresh session.
     assert session_maker.call_count == 2
     processing_session.rollback.assert_awaited_once_with()
-    processing_session.get.assert_not_awaited()
+    processing_session.get.assert_awaited_once_with(Document, 42, with_for_update=True)
     processing_session.commit.assert_not_awaited()
-    status_session.get.assert_awaited_once_with(Document, 42)
+    status_session.get.assert_awaited_once_with(Document, 42, with_for_update=True)
     assert failed_document.status == DocumentStatus.FAILED
     status_session.commit.assert_awaited_once_with()
 
@@ -165,8 +169,11 @@ async def test_flush_failure_uses_fresh_session_to_record_failed_status(
 async def test_successful_processing_commits_completed_status(ingestion_data):
     """Successful ingestion should commit COMPLETED without opening a second session."""
     parent_chunks, child_chunks = ingestion_data
-    completed_document = MagicMock()
+    completed_document = MagicMock(status=DocumentStatus.PROCESSING)
     processing_session = MagicMock()
+    processing_session.get = AsyncMock(
+        return_value=MagicMock(status=DocumentStatus.PROCESSING)
+    )
     processing_session.flush = AsyncMock()
     processing_session.rollback = AsyncMock()
     processing_session.get = AsyncMock(return_value=completed_document)
@@ -207,7 +214,7 @@ async def test_successful_processing_commits_completed_status(ingestion_data):
 
     session_maker.assert_called_once_with()
     assert processing_session.flush.await_count == 2
-    processing_session.get.assert_awaited_once_with(Document, 42)
+    processing_session.get.assert_awaited_once_with(Document, 42, with_for_update=True)
     assert completed_document.status == DocumentStatus.COMPLETED
     processing_session.commit.assert_awaited_once_with()
     processing_session.rollback.assert_not_awaited()
@@ -271,10 +278,13 @@ async def test_empty_chunk_results_mark_document_failed(
 ):
     """A PDF that produces no usable chunks must not be marked COMPLETED."""
     processing_session = MagicMock()
+    processing_session.get = AsyncMock(
+        return_value=MagicMock(status=DocumentStatus.PROCESSING)
+    )
     processing_session.rollback = AsyncMock()
     processing_session.commit = AsyncMock()
 
-    failed_document = MagicMock()
+    failed_document = MagicMock(status=DocumentStatus.PROCESSING)
     status_session = MagicMock()
     status_session.get = AsyncMock(return_value=failed_document)
     status_session.commit = AsyncMock()
@@ -320,9 +330,12 @@ async def test_empty_chunk_results_mark_document_failed(
 async def test_pdf_without_readable_pages_marks_document_failed(caplog):
     """An empty PDF-loader result must stop ingestion before chunking."""
     processing_session = MagicMock()
+    processing_session.get = AsyncMock(
+        return_value=MagicMock(status=DocumentStatus.PROCESSING)
+    )
     processing_session.rollback = AsyncMock()
 
-    failed_document = MagicMock()
+    failed_document = MagicMock(status=DocumentStatus.PROCESSING)
     status_session = MagicMock()
     status_session.get = AsyncMock(return_value=failed_document)
     status_session.commit = AsyncMock()
@@ -362,9 +375,12 @@ async def test_pdf_without_readable_pages_marks_document_failed(caplog):
 async def test_cancellation_rolls_back_marks_failed_and_propagates(caplog):
     """Cancellation should clean up state while remaining visible to the caller."""
     processing_session = MagicMock()
+    processing_session.get = AsyncMock(
+        return_value=MagicMock(status=DocumentStatus.PROCESSING)
+    )
     processing_session.rollback = AsyncMock()
 
-    failed_document = MagicMock()
+    failed_document = MagicMock(status=DocumentStatus.PROCESSING)
     status_session = MagicMock()
     status_session.get = AsyncMock(return_value=failed_document)
     status_session.commit = AsyncMock()

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...ai.document_ingestion import process_uploaded_document
 from ...core.db import get_session
 from ...core.document_storage import delete_document_file, store_document_file
-from ...models import Document, User
+from ...models import Document, DocumentOutbox, User
 from ...schemas.document import DocumentCreate, DocumentRead
 from ..dependencies.auth import get_current_user
 from ..dependencies.forms import document_create_form
@@ -64,16 +64,25 @@ async def upload_document(
     )
     session.add(db_document)
     stored = False
+    commit_started = False
+    document_id: int | None = None
     try:
         # Flush assigns the database ID used as the storage key without committing yet.
         await session.flush()
-        await store_document_file(db_document.id, file_bytes)
+        document_id = db_document.id
+        await store_document_file(document_id, file_bytes)
         stored = True
+        session.add(DocumentOutbox(document_id=document_id))
+        # Validate both records before attempting the shared commit.
+        await session.flush()
+        commit_started = True
         await session.commit()
     except BaseException:
         await session.rollback()
-        if stored:
-            await delete_document_file(db_document.id)
+        # A lost COMMIT response can mean both rows actually committed. Preserve
+        # the PDF in that case; an orphan is recoverable, a deleted source is not.
+        if document_id is not None and stored and not commit_started:
+            await delete_document_file(document_id)
         raise
     await session.refresh(db_document)
 

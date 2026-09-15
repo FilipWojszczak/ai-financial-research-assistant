@@ -16,6 +16,7 @@ def create_celery_app() -> Celery:
     app.conf.update(
         accept_content=["json"],
         broker_connection_retry_on_startup=True,
+        broker_transport_options={"confirm_publish": True},
         enable_utc=True,
         task_default_queue="document_ingestion",
         task_default_delivery_mode="persistent",

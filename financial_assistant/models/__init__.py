@@ -7,12 +7,14 @@ from .graph import (
     GraphCommunity,
     GraphCommunityMembership,
 )
+from .outbox import DocumentOutbox
 from .user import User
 
 __all__ = [
     "Base",
     "ChildChunk",
     "Document",
+    "DocumentOutbox",
     "Entity",
     "EntityRelationship",
     "EntityType",

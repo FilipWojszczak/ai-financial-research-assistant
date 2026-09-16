@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import DocumentOutbox
 from .db import async_session_maker
@@ -50,7 +50,7 @@ def publish_ingestion(document_id: int, event_id: uuid.UUID) -> None:
 async def publish_pending_documents(
     *,
     limit: int = 100,
-    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    session_factory: Callable[[], AsyncSession] | None = None,
     publish: Callable[[int, uuid.UUID], None] | None = None,
 ) -> int:
     """Attempt at most limit due rows, committing each independently.

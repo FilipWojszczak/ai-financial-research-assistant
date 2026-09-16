@@ -4,10 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import BackgroundTasks, HTTPException, UploadFile
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import Headers
 from tests.utils import DocumentFactory, TokenFactory, UserFactory
 
 from financial_assistant.api.routers.documents import upload_document
+from financial_assistant.models import DocumentOutbox
 from financial_assistant.models.document import DocumentStatus, DocumentType
 from financial_assistant.schemas.document import DocumentCreate
 
@@ -22,7 +25,10 @@ _VALID_PDF = b"%PDF fake content"
 
 
 async def test_upload_document_private(
-    client: AsyncClient, user_factory: UserFactory, token_factory: TokenFactory
+    client: AsyncClient,
+    user_factory: UserFactory,
+    token_factory: TokenFactory,
+    session: AsyncSession,
 ):
     user = await user_factory(email="uploader@example.com")
     token = token_factory(user)
@@ -48,10 +54,19 @@ async def test_upload_document_private(
     assert data["owner_id"] == user.id
     mock_store.assert_awaited_once_with(data["id"], _VALID_PDF)
     mock_process.assert_awaited_once_with(document_id=data["id"])
+    event = await session.scalar(
+        select(DocumentOutbox).where(DocumentOutbox.document_id == data["id"])
+    )
+    assert event is not None
+    assert event.published_at is None
+    assert event.attempts == 0
 
 
 async def test_upload_document_public(
-    client: AsyncClient, user_factory: UserFactory, token_factory: TokenFactory
+    client: AsyncClient,
+    user_factory: UserFactory,
+    token_factory: TokenFactory,
+    session: AsyncSession,
 ):
     user = await user_factory(email="public_uploader@example.com")
     token = token_factory(user)
@@ -76,6 +91,12 @@ async def test_upload_document_public(
     assert data["owner_id"] is None
     mock_store.assert_awaited_once_with(data["id"], _VALID_PDF)
     mock_process.assert_awaited_once_with(document_id=data["id"])
+    event = await session.scalar(
+        select(DocumentOutbox).where(DocumentOutbox.document_id == data["id"])
+    )
+    assert event is not None
+    assert event.published_at is None
+    assert event.attempts == 0
 
 
 async def test_upload_document_wrong_content_type(
@@ -139,8 +160,9 @@ async def test_upload_document_rejects_upload_file_without_filename():
     assert exc_info.value.detail == "File must have a filename"
 
 
-async def test_upload_commit_failure_rolls_back_and_removes_stored_pdf():
-    """A failed metadata commit must not leave an orphaned source PDF."""
+@pytest.mark.parametrize("failure_stage", ["flush", "commit"])
+async def test_upload_failure_cleans_up_only_before_commit(failure_stage):
+    """Keep source data when the outcome of COMMIT cannot be known."""
     file = UploadFile(
         file=BytesIO(_VALID_PDF),
         filename="report.pdf",
@@ -149,7 +171,10 @@ async def test_upload_commit_failure_rolls_back_and_removes_stored_pdf():
     session = MagicMock()
 
     async def assign_document_id():
-        session.add.call_args.args[0].id = 42
+        if session.flush.await_count == 1:
+            session.add.call_args_list[0].args[0].id = 42
+        elif failure_stage == "flush":
+            raise RuntimeError("commit failed")
 
     session.flush = AsyncMock(side_effect=assign_document_id)
     session.commit = AsyncMock(side_effect=RuntimeError("commit failed"))
@@ -174,10 +199,14 @@ async def test_upload_commit_failure_rolls_back_and_removes_stored_pdf():
             user=MagicMock(id=1),
         )
 
-    session.flush.assert_awaited_once_with()
+    assert session.flush.await_count == 2
     mock_store.assert_awaited_once_with(42, _VALID_PDF)
     session.rollback.assert_awaited_once_with()
-    mock_delete.assert_awaited_once_with(42)
+    if failure_stage == "flush":
+        mock_delete.assert_awaited_once_with(42)
+        session.commit.assert_not_awaited()
+    else:
+        mock_delete.assert_not_awaited()
     session.refresh.assert_not_awaited()
     assert not background_tasks.tasks
 

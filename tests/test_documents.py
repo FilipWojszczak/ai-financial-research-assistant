@@ -2,7 +2,7 @@ from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException, UploadFile
+from fastapi import HTTPException, UploadFile
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,8 @@ from financial_assistant.models import DocumentOutbox
 from financial_assistant.models.document import DocumentStatus, DocumentType
 from financial_assistant.schemas.document import DocumentCreate
 
-_PROCESS_TASK = "financial_assistant.api.routers.documents.process_uploaded_document"
+_PUBLISH_TASK = "financial_assistant.core.outbox.publish_ingestion"
+_INGEST_DOCUMENT = "financial_assistant.ai.document_ingestion.ingest_document"
 _STORE_FILE = "financial_assistant.api.routers.documents.store_document_file"
 _DELETE_FILE = "financial_assistant.api.routers.documents.delete_document_file"
 
@@ -34,7 +35,8 @@ async def test_upload_document_private(
     token = token_factory(user)
 
     with (
-        patch(_PROCESS_TASK, new_callable=AsyncMock) as mock_process,
+        patch(_PUBLISH_TASK, side_effect=ConnectionError("broker unavailable")) as send,
+        patch(_INGEST_DOCUMENT, new_callable=AsyncMock) as ingest,
         patch(_STORE_FILE, new_callable=AsyncMock) as mock_store,
     ):
         response = await client.post(
@@ -53,7 +55,8 @@ async def test_upload_document_private(
     assert data["status"] == DocumentStatus.PROCESSING
     assert data["owner_id"] == user.id
     mock_store.assert_awaited_once_with(data["id"], _VALID_PDF)
-    mock_process.assert_awaited_once_with(document_id=data["id"])
+    send.assert_not_called()
+    ingest.assert_not_awaited()
     event = await session.scalar(
         select(DocumentOutbox).where(DocumentOutbox.document_id == data["id"])
     )
@@ -72,7 +75,8 @@ async def test_upload_document_public(
     token = token_factory(user)
 
     with (
-        patch(_PROCESS_TASK, new_callable=AsyncMock) as mock_process,
+        patch(_PUBLISH_TASK, side_effect=ConnectionError("broker unavailable")) as send,
+        patch(_INGEST_DOCUMENT, new_callable=AsyncMock) as ingest,
         patch(_STORE_FILE, new_callable=AsyncMock) as mock_store,
     ):
         response = await client.post(
@@ -90,7 +94,8 @@ async def test_upload_document_public(
     data = response.json()
     assert data["owner_id"] is None
     mock_store.assert_awaited_once_with(data["id"], _VALID_PDF)
-    mock_process.assert_awaited_once_with(document_id=data["id"])
+    send.assert_not_called()
+    ingest.assert_not_awaited()
     event = await session.scalar(
         select(DocumentOutbox).where(DocumentOutbox.document_id == data["id"])
     )
@@ -151,7 +156,6 @@ async def test_upload_document_rejects_upload_file_without_filename():
                 year=2023,
             ),
             file=file,
-            background_tasks=BackgroundTasks(),
             session=AsyncMock(),
             user=MagicMock(id=1),
         )
@@ -180,7 +184,6 @@ async def test_upload_failure_cleans_up_only_before_commit(failure_stage):
     session.commit = AsyncMock(side_effect=RuntimeError("commit failed"))
     session.rollback = AsyncMock()
     session.refresh = AsyncMock()
-    background_tasks = BackgroundTasks()
 
     with (
         patch(_STORE_FILE, new_callable=AsyncMock) as mock_store,
@@ -194,7 +197,6 @@ async def test_upload_failure_cleans_up_only_before_commit(failure_stage):
                 year=2023,
             ),
             file=file,
-            background_tasks=background_tasks,
             session=session,
             user=MagicMock(id=1),
         )
@@ -208,7 +210,6 @@ async def test_upload_failure_cleans_up_only_before_commit(failure_stage):
     else:
         mock_delete.assert_not_awaited()
     session.refresh.assert_not_awaited()
-    assert not background_tasks.tasks
 
 
 async def test_upload_document_unauthenticated(client: AsyncClient):

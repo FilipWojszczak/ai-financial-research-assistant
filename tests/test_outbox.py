@@ -6,7 +6,7 @@ from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import BackgroundTasks, UploadFile
+from fastapi import UploadFile
 from sqlalchemy import delete, func, select, text
 from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -200,7 +200,6 @@ async def test_outbox_insert_failure_rolls_back_upload_and_cleans_source(outbox_
     def reject_insert(*args):
         raise RuntimeError("outbox insert failed")
 
-    background = BackgroundTasks()
     uploaded_file = UploadFile(
         file=BytesIO(b"pdf"),
         filename="report.pdf",
@@ -228,12 +227,10 @@ async def test_outbox_insert_failure_rolls_back_upload_and_cleans_source(outbox_
                         is_public=True,
                     ),
                     file=uploaded_file,
-                    background_tasks=background,
                     session=session,
                     user=MagicMock(id=1),
                 )
         assert remove.await_count == 1
-        assert not background.tasks
         async with outbox_db() as check:
             assert await check.scalar(select(func.count()).select_from(Document)) == 0
             assert (
@@ -275,3 +272,25 @@ async def test_cancellation_keeps_request_pending(outbox_db):
     assert saved.attempts == 0
     send.side_effect = None
     assert await publish_pending_documents(session_factory=outbox_db, publish=send) == 1
+
+
+async def test_shutdown_finishes_current_row_and_leaves_rest_pending(outbox_db):
+    first = await create_event(outbox_db)
+    second = await create_event(outbox_db)
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def send(document_id, event_id):
+        # The broker publisher runs in a thread; signal the loop safely.
+        loop.call_soon_threadsafe(stop.set)
+
+    publish = MagicMock(side_effect=send)
+    assert (
+        await publish_pending_documents(
+            session_factory=outbox_db, publish=publish, stop=stop
+        )
+        == 1
+    )
+    publish.assert_called_once_with(first.document_id, first.id)
+    assert (await read_event(outbox_db, first.id)).published_at is not None
+    assert (await read_event(outbox_db, second.id)).published_at is None

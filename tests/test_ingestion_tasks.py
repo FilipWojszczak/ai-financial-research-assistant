@@ -3,7 +3,7 @@ from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from celery.exceptions import Retry
+from celery.exceptions import Reject, Retry
 from celery.result import EagerResult
 
 from financial_assistant.ai.document_ingestion import (
@@ -89,7 +89,9 @@ def test_persistent_error_stops_after_four_attempts():
     with patch(f"{_TASK_MODULE}._run_attempt", new=attempt):
         # Celery eager execution follows retries synchronously, without RabbitMQ.
         result = ingest_task.apply(args=(42,), throw=False)
-    assert result.failed()
+    assert result.state == "REJECTED"
+    assert isinstance(result.result, Reject)
+    assert result.result.requeue is False
     assert attempt.await_count == 4
     assert [call.kwargs["final_attempt"] for call in attempt.await_args_list] == [
         False,
@@ -101,11 +103,11 @@ def test_persistent_error_stops_after_four_attempts():
 
 def test_invalid_pdf_is_not_retried():
     attempt = AsyncMock(side_effect=InvalidDocumentError("empty PDF"))
-    with (
-        patch(f"{_TASK_MODULE}._run_attempt", new=attempt),
-        pytest.raises(InvalidDocumentError),
-    ):
-        ingest_task.apply(args=(42,), throw=True)
+    with patch(f"{_TASK_MODULE}._run_attempt", new=attempt):
+        result = ingest_task.apply(args=(42,), throw=True)
+    assert result.state == "REJECTED"
+    assert isinstance(result.result, Reject)
+    assert result.result.requeue is False
     assert attempt.await_count == 1
 
 
@@ -113,9 +115,12 @@ def test_invalid_pdf_is_not_retried():
 def test_invalid_message_is_rejected_before_opening_resources(document_id):
     with (
         patch(f"{_TASK_MODULE}._run_attempt", new_callable=AsyncMock) as attempt,
-        pytest.raises(ValueError, match="positive integer"),
     ):
-        ingest_task.apply(args=(document_id,), throw=True)
+        result = ingest_task.apply(args=(document_id,), throw=True)
+    assert result.state == "REJECTED"
+    assert isinstance(result.result, Reject)
+    assert result.result.requeue is False
+    assert "positive integer" in str(result.result)
     attempt.assert_not_called()
 
 

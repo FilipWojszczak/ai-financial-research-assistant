@@ -2,10 +2,8 @@ FROM python:3.13-slim
 
 # PYTHONUNBUFFERED=1 - Ensures Python output is sent straight to the terminal without buffering.
 # PYTHONDONTWRITEBYTECODE=1 - Prevents Python from writing .pyc files to disk.
-# UV_SYSTEM_PYTHON=1 - Instructs the 'uv' package manager to install dependencies globally in the container's system Python, not requiring a virtual environment (venv).
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    UV_SYSTEM_PYTHON=1
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /workspace
 
@@ -42,3 +40,8 @@ ENV PATH="/root/.local/bin:$PATH"
 
 # The '*' after uv.lock means this file will be copied if it exists, but if it doesn't, Docker won't throw an error.
 COPY pyproject.toml uv.lock* ./
+
+# Runtime dependencies live outside the source bind mount. Workers and the
+# publisher start without installing packages or sharing the app's dev venv.
+RUN UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-dev --no-install-project
+ENV PATH="/opt/venv/bin:$PATH"

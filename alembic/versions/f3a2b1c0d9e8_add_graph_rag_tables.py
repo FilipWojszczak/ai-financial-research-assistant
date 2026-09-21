@@ -29,6 +29,8 @@ def upgrade() -> None:
         "location",
         "other",
         name="entity_type_enum",
+        # Created explicitly below; table creation must not emit CREATE TYPE again.
+        create_type=False,
     )
     entity_type_enum.create(op.get_bind())
 

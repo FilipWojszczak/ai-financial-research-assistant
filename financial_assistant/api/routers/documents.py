@@ -2,7 +2,6 @@ from typing import Annotated
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     File,
     HTTPException,
@@ -11,7 +10,6 @@ from fastapi import (
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...ai.document_ingestion import process_uploaded_document
 from ...core.db import get_session
 from ...core.document_storage import delete_document_file, store_document_file
 from ...models import Document, DocumentOutbox, User
@@ -42,7 +40,6 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 async def upload_document(
     document_data: Annotated[DocumentCreate, Depends(document_create_form)],
     file: Annotated[UploadFile, File()],
-    background_tasks: BackgroundTasks,
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[User, Depends(get_current_user)],
 ):
@@ -85,8 +82,6 @@ async def upload_document(
             await delete_document_file(document_id)
         raise
     await session.refresh(db_document)
-
-    background_tasks.add_task(process_uploaded_document, document_id=db_document.id)
 
     return db_document
 

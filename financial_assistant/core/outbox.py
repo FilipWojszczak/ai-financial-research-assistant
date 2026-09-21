@@ -11,10 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import DocumentOutbox
 from .db import async_session_maker
+from .messaging import (
+    INGESTION_QUEUE,
+    INGESTION_TASK_NAME,
+    declare_ingestion_topology,
+)
 
 logger = logging.getLogger(__name__)
-
-INGESTION_TASK_NAME = "financial_assistant.tasks.document_ingestion.ingest_document"
 
 
 def publish_ingestion(document_id: int, event_id: uuid.UUID) -> None:
@@ -34,11 +37,12 @@ def publish_ingestion(document_id: int, event_id: uuid.UUID) -> None:
     ) as connection:
         connection.ensure_connection(max_retries=0)
         with celery_app.amqp.Producer(connection) as producer:
+            declare_ingestion_topology(producer.channel)
             celery_app.send_task(
                 INGESTION_TASK_NAME,
                 kwargs={"document_id": document_id},
                 task_id=str(event_id),
-                queue="document_ingestion",
+                queue=INGESTION_QUEUE,
                 producer=producer,
                 retry=False,
                 delivery_mode=2,
@@ -52,6 +56,7 @@ async def publish_pending_documents(
     limit: int = 100,
     session_factory: Callable[[], AsyncSession] | None = None,
     publish: Callable[[int, uuid.UUID], None] | None = None,
+    stop: asyncio.Event | None = None,
 ) -> int:
     """Attempt at most limit due rows, committing each independently.
 
@@ -64,6 +69,8 @@ async def publish_pending_documents(
     send = publish if publish is not None else publish_ingestion
     published = 0
     for _ in range(limit):
+        if stop is not None and stop.is_set():
+            break
         async with factory() as session, session.begin():
             event = await session.scalar(
                 select(DocumentOutbox)

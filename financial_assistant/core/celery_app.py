@@ -1,6 +1,12 @@
 from celery import Celery
 
 from .config import get_settings
+from .messaging import (
+    INGESTION_EXCHANGE,
+    INGESTION_QUEUE,
+    INGESTION_ROUTING_KEY,
+    ingestion_queue,
+)
 
 
 def create_celery_app() -> Celery:
@@ -18,7 +24,14 @@ def create_celery_app() -> Celery:
         broker_connection_retry_on_startup=True,
         broker_transport_options={"confirm_publish": True},
         enable_utc=True,
-        task_default_queue="document_ingestion",
+        task_default_queue=INGESTION_QUEUE,
+        task_default_exchange=INGESTION_EXCHANGE,
+        task_default_exchange_type="topic",
+        task_default_routing_key=INGESTION_ROUTING_KEY,
+        task_queues=(ingestion_queue,),
+        task_create_missing_queues=False,
+        worker_detect_quorum_queues=True,
+        worker_cancel_long_running_tasks_on_connection_loss=True,
         task_default_delivery_mode="persistent",
         task_ignore_result=True,
         task_serializer="json",

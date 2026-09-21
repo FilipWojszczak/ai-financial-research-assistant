@@ -1,3 +1,16 @@
+# Background services share code and configuration; their dependencies are baked
+# into /opt/venv in the image. The app keeps its interactive devcontainer workflow.
+x-background-service: &background-service
+  build:
+    context: .
+  init: true
+  env_file:
+    - .env
+  environment:
+    DOCUMENT_STORAGE_PATH: ${DOCUMENT_STORAGE_PATH:?Set in .env}
+  volumes:
+    - .:/workspace:ro
+
 services:
   db:
     image: paradedb/paradedb:0.23.4-pg17
@@ -42,22 +55,77 @@ services:
       # Mounts code to /workspace.
       # The :cached flag optimizes the filesystem on macOS; it's natively ignored on Ubuntu, but good practice.
       - .:/workspace:cached
-      # Source PDFs survive app restarts and are shared with the future worker.
-      - document_storage:/var/lib/financial-assistant/documents
+      # Source PDFs survive app restarts and are shared with the Celery worker.
+      - document_storage:${DOCUMENT_STORAGE_PATH:?Set in .env}
     env_file:
       - .env
     environment:
-      DOCUMENT_STORAGE_PATH: /var/lib/financial-assistant/documents
+      DOCUMENT_STORAGE_PATH: ${DOCUMENT_STORAGE_PATH:?Set in .env}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     # Doesn't start the app immediately. Keeps the container alive in the background
     # so it is possible to freely connect via the terminal and manually run code.
     command: sleep infinity
+
+  migrate:
+    <<: *background-service
+    command: ["/opt/venv/bin/alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  broker-init:
+    <<: *background-service
+    command: ["/opt/venv/bin/python", "-m", "financial_assistant.configure_broker"]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  worker:
+    <<: *background-service
+    restart: unless-stopped
+    # Redefining volumes replaces the inherited list, so repeat the code mount.
+    volumes:
+      - .:/workspace:ro
+      - document_storage:${DOCUMENT_STORAGE_PATH:?Set in .env}:ro
+    command:
+      - /opt/venv/bin/celery
+      - -A
+      - financial_assistant.core.celery_app:celery_app
+      - worker
+      - --pool=prefork
+      - --concurrency=2
+      - --loglevel=INFO
+      - -Q
+      - document_ingestion
+    stop_grace_period: 10m
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      broker-init:
+        condition: service_completed_successfully
+
+  outbox:
+    <<: *background-service
+    restart: unless-stopped
+    command:
+      - /opt/venv/bin/python
+      - -m
+      - financial_assistant.publish_outbox
+      - --loop
+      - --poll-interval
+      - "2"
+      - --limit
+      - "100"
+    stop_grace_period: 60s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      broker-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres_vector_data:

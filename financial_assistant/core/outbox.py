@@ -3,11 +3,9 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import DocumentOutbox
 from .db import async_session_maker
@@ -54,8 +52,6 @@ def publish_ingestion(document_id: int, event_id: uuid.UUID) -> None:
 async def publish_pending_documents(
     *,
     limit: int = 100,
-    session_factory: Callable[[], AsyncSession] | None = None,
-    publish: Callable[[int, uuid.UUID], None] | None = None,
     stop: asyncio.Event | None = None,
 ) -> int:
     """Attempt at most limit due rows, committing each independently.
@@ -65,13 +61,11 @@ async def publish_pending_documents(
     """
     if type(limit) is not int or limit <= 0:
         raise ValueError("limit must be a positive integer")
-    factory = session_factory if session_factory is not None else async_session_maker
-    send = publish if publish is not None else publish_ingestion
     published = 0
     for _ in range(limit):
         if stop is not None and stop.is_set():
             break
-        async with factory() as session, session.begin():
+        async with async_session_maker() as session, session.begin():
             event = await session.scalar(
                 select(DocumentOutbox)
                 .where(
@@ -87,7 +81,7 @@ async def publish_pending_documents(
             event.attempts += 1
             try:
                 # Synchronous AMQP I/O runs off the asyncio thread.
-                await asyncio.to_thread(send, event.document_id, event.id)
+                await asyncio.to_thread(publish_ingestion, event.document_id, event.id)
             except Exception as exc:
                 error_type = type(exc).__name__[:200]
                 event.last_error = error_type

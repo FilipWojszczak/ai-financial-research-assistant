@@ -22,7 +22,7 @@
       "request": "launch",
       "module": "pytest",
       "args": ["tests", "-v"],
-      "env": { "ENVIRONMENT": "testing" },
+      "env": { "ENVIRONMENT": "testing", "RUN_RABBITMQ_TESTS": "1" },
       "console": "integratedTerminal",
       "justMyCode": true
     }

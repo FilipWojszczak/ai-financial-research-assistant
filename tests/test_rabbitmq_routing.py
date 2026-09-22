@@ -3,7 +3,8 @@
 import os
 import time
 import uuid
-from contextlib import suppress
+from contextlib import closing, suppress
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -12,8 +13,8 @@ from kombu import Connection, Exchange, Producer, Queue
 
 from financial_assistant.core.config import get_settings
 from financial_assistant.core.messaging import (
+    INGESTION_QUEUE_ARGUMENTS,
     declare_ingestion_topology,
-    ingestion_queue,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -24,7 +25,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def broker_queues():
-    prefix = "stage5_test_" + uuid.uuid4().hex
+    prefix = "test_" + uuid.uuid4().hex
     failed_exchange = Exchange(prefix + "_failed", type="direct", durable=True)
     work_exchange = Exchange(prefix, type="topic", durable=True)
     failed = Queue(
@@ -40,7 +41,7 @@ def broker_queues():
         routing_key="document.ingest",
         durable=True,
         queue_arguments={
-            **ingestion_queue.queue_arguments,
+            **INGESTION_QUEUE_ARGUMENTS,
             "x-dead-letter-exchange": failed_exchange.name,
         },
     )
@@ -55,7 +56,11 @@ def broker_queues():
     ) as connection:
         connection.ensure_connection(max_retries=0)
         try:
-            with connection.channel() as channel:
+            # Kombu may return a Logwrapped channel. It forwards close() through
+            # __getattr__, which Pylance cannot see, and lacks the context-manager
+            # methods needed by a direct `with` statement. closing() guarantees
+            # cleanup; the cast is limited to this third-party typing boundary.
+            with closing(cast(Any, connection.channel())) as channel:
                 with (
                     patch(
                         "financial_assistant.core.messaging.dead_letter_queue", failed
@@ -79,7 +84,11 @@ def broker_queues():
             for resource in (work, failed, work_exchange, failed_exchange):
                 # A failed declaration may have closed its channel or created only
                 # some resources. An absent resource must not prevent cleanup.
-                with suppress(NotFound), connection.channel() as cleanup:
+                # Close this channel even if deletion fails.
+                with (
+                    suppress(NotFound),
+                    closing(cast(Any, connection.channel())) as cleanup,
+                ):
                     resource(cleanup).delete()
 
 
@@ -112,7 +121,7 @@ def test_repeated_crash_requeues_eventually_reach_failure_queue(broker_queues):
         if parked is not None:
             assert parked.payload == {"document_id": 42}
             assert parked.headers["x-death"][0]["reason"] == "delivery_limit"
-            assert deliveries <= 7
+            assert deliveries == 6
             parked.ack()
             return
         message = work.get(accept=["json"])

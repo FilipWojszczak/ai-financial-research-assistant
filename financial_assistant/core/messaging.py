@@ -10,6 +10,15 @@ DEAD_LETTER_QUEUE = "document_ingestion_failed"
 DEAD_LETTER_EXCHANGE = "document_ingestion_dead_letters"
 DEAD_LETTER_ROUTING_KEY = "failed"
 
+INGESTION_QUEUE_ARGUMENTS: dict[str, str | int] = {
+    "x-queue-type": "quorum",
+    "x-delivery-limit": 5,
+    "x-dead-letter-exchange": DEAD_LETTER_EXCHANGE,
+    "x-dead-letter-routing-key": DEAD_LETTER_ROUTING_KEY,
+    "x-dead-letter-strategy": "at-least-once",
+    "x-overflow": "reject-publish",
+}
+
 dead_letter_queue = Queue(
     DEAD_LETTER_QUEUE,
     exchange=Exchange(DEAD_LETTER_EXCHANGE, type="direct", durable=True),
@@ -24,14 +33,7 @@ ingestion_queue = Queue(
     exchange=Exchange(INGESTION_EXCHANGE, type="topic", durable=True),
     routing_key=INGESTION_ROUTING_KEY,
     durable=True,
-    queue_arguments={
-        "x-queue-type": "quorum",
-        "x-delivery-limit": 5,
-        "x-dead-letter-exchange": DEAD_LETTER_EXCHANGE,
-        "x-dead-letter-routing-key": DEAD_LETTER_ROUTING_KEY,
-        "x-dead-letter-strategy": "at-least-once",
-        "x-overflow": "reject-publish",
-    },
+    queue_arguments=INGESTION_QUEUE_ARGUMENTS.copy(),
 )
 
 

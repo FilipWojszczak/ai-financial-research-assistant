@@ -24,7 +24,8 @@ dead_letter_queue = Queue(
     exchange=Exchange(DEAD_LETTER_EXCHANGE, type="direct", durable=True),
     routing_key=DEAD_LETTER_ROUTING_KEY,
     durable=True,
-    queue_arguments={"x-queue-type": "quorum"},
+    # Keep failures available even after repeated consumer crashes.
+    queue_arguments={"x-queue-type": "quorum", "x-delivery-limit": -1},
 )
 
 ingestion_queue = Queue(

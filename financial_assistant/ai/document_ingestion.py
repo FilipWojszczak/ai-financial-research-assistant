@@ -15,6 +15,7 @@ from ..core.document_storage import document_file_path
 from ..models.document import ChildChunk, Document, DocumentStatus, ParentChunk
 from .community_detection import process_document_communities
 from .graph_extraction import process_document_graph
+from .requests import embed_texts
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +95,7 @@ async def generate_child_embeddings(
 
     # Extract the content from child chunks to generate embeddings
     texts = [chunk["content"] for chunk in child_chunks]
-    embeddings = await embeddings_model.aembed_documents(texts)
-
-    if len(embeddings) != len(child_chunks):
-        raise ValueError(
-            "Embedding count does not match child chunk count: "
-            f"{len(embeddings)} != {len(child_chunks)}"
-        )
+    embeddings = await embed_texts(embeddings_model, texts)
 
     # Attach the generated embeddings back to the child chunks
     for chunk, embedding in zip(child_chunks, embeddings, strict=True):
@@ -127,8 +122,7 @@ async def _mark_document_failed(
                 document.status = DocumentStatus.FAILED
                 await status_session.commit()
     except Exception:
-        # A database outage can prevent this update; stale-job reconciliation will
-        # be needed in the operations stage of the migration.
+        # The failure consumer repeats this update after the message is parked.
         logger.exception(
             "Failed to update status to FAILED for document %d", document_id
         )
@@ -149,6 +143,7 @@ async def ingest_document(
             if document is None or document.status != DocumentStatus.PROCESSING:
                 return
 
+            logger.info("Document %d: loading source PDF", document_id)
             documents = await load_pdf_documents(document_file_path(document_id))
             if not documents:
                 raise InvalidDocumentError("PDF contains no readable pages")
@@ -159,6 +154,9 @@ async def ingest_document(
             if not child_chunks:
                 raise InvalidDocumentError("PDF produced no child chunks")
 
+            logger.info(
+                "Document %d: embedding %d chunks", document_id, len(child_chunks)
+            )
             embedded_children = await generate_child_embeddings(child_chunks)
 
             # Save parent_chunks and embedded_children to the database
@@ -198,22 +196,8 @@ async def ingest_document(
             # Update document status to COMPLETED
             document.status = DocumentStatus.COMPLETED
             await session.commit()
+            logger.info("Document %d: completed", document_id)
         except BaseException:
             # Includes cancellation: partial chunks and graph data must roll back.
             await session.rollback()
             raise
-
-
-async def process_uploaded_document(document_id: int) -> None:
-    """Compatibility entry point for FastAPI until the API cutover stage."""
-    try:
-        await ingest_document(document_id)
-    except asyncio.CancelledError:
-        logger.warning(
-            "Processing cancelled for document %d", document_id, exc_info=True
-        )
-        await _mark_document_failed(document_id)
-        raise
-    except Exception:
-        logger.exception("Error processing document %d", document_id)
-        await _mark_document_failed(document_id)

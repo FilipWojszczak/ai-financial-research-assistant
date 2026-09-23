@@ -127,6 +127,29 @@ services:
       broker-init:
         condition: service_completed_successfully
 
+  failure-reconciler:
+    <<: *background-service
+    restart: unless-stopped
+    command: ["/opt/venv/bin/python", "-m", "financial_assistant.reconcile_ingestion", "--loop"]
+    stop_grace_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      broker-init:
+        condition: service_completed_successfully
+
+  storage-cleanup:
+    <<: *background-service
+    restart: unless-stopped
+    volumes:
+      - .:/workspace:ro
+      - document_storage:${DOCUMENT_STORAGE_PATH:?Set in .env}
+    command: ["/opt/venv/bin/python", "-m", "financial_assistant.cleanup_storage", "--loop"]
+    stop_grace_period: 60s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   postgres_vector_data:
   rabbitmq_data:

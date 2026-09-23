@@ -11,10 +11,13 @@ from ..models.graph import (
     GraphCommunity,
     GraphCommunityMembership,
 )
+from .requests import ai_request, embed_texts
 
 logger = logging.getLogger(__name__)
 
-_summary_llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0)
+_summary_llm = ChatGoogleGenerativeAI(
+    model="gemini-3.6-flash", temperature=0, max_retries=1
+)
 _embeddings_model = GoogleGenerativeAIEmbeddings(
     model="models/gemini-embedding-001", output_dimensionality=768
 )
@@ -51,8 +54,10 @@ async def _generate_community_summary(
         or "None identified"
     )
 
-    response = await _summary_llm.ainvoke(
-        _SUMMARY_PROMPT.format(entities=entity_lines, relationships=rel_lines)
+    response = await ai_request(
+        _summary_llm.ainvoke(
+            _SUMMARY_PROMPT.format(entities=entity_lines, relationships=rel_lines)
+        )
     )
     content = response.text.strip()
 
@@ -137,36 +142,21 @@ async def process_document_communities(
             rel for key, rels in rel_lookup.items() if key <= member_ids for rel in rels
         ]
 
-        try:
-            title, summary = await _generate_community_summary(
-                community_entities, community_rels
-            )
-        except Exception:
-            logger.warning(
-                "Failed to summarise a community for document %d",
-                document_id,
-                exc_info=True,
-            )
-            n = len(community_entities)
-            title = f"Community of {n} entities"
-            summary = f"A cluster of {n} related financial entities."
+        title, summary = await _generate_community_summary(
+            community_entities, community_rels
+        )
+        logger.info(
+            "Document %d: summarized community %d", document_id, len(community_data) + 1
+        )
 
         community_data.append((community_entities, title, summary))
 
     if not community_data:
         return
 
-    # Batch-embed all summaries at once
+    # Embed summaries in bounded batches
     summaries = [summary for _, _, summary in community_data]
-    try:
-        embeddings = await _embeddings_model.aembed_documents(summaries)
-    except Exception:
-        logger.warning(
-            "Failed to embed community summaries for document %d",
-            document_id,
-            exc_info=True,
-        )
-        embeddings = [None] * len(summaries)
+    embeddings = await embed_texts(_embeddings_model, summaries)
 
     for (community_entities, title, summary), embedding in zip(
         community_data, embeddings, strict=True

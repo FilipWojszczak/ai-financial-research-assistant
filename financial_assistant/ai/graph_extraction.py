@@ -7,10 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.document import ParentChunk
 from ..models.graph import Entity, EntityRelationship, EntityType
+from .requests import ai_request
 
 logger = logging.getLogger(__name__)
 
-_extraction_llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0)
+_extraction_llm = ChatGoogleGenerativeAI(
+    model="gemini-3.6-flash", temperature=0, max_retries=1
+)
 
 
 class ExtractedEntity(BaseModel):
@@ -81,8 +84,8 @@ def _normalize_entity_type(type_str: str) -> EntityType:
 
 async def extract_entities_and_relationships(chunk_text: str) -> ExtractionResult:
     """Call the LLM to extract entities and relationships from a text chunk."""
-    result = await _structured_extractor.ainvoke(
-        _EXTRACTION_PROMPT.format(text=chunk_text)
+    result = await ai_request(
+        _structured_extractor.ainvoke(_EXTRACTION_PROMPT.format(text=chunk_text))
     )
     return result  # type: ignore[return-value]
 
@@ -104,21 +107,15 @@ async def process_document_graph(
     entity_map: dict[str, Entity] = {}
     # Collect relationship data until entity IDs are available
     pending_relationships: list[dict] = []
-    failed_extractions = 0
-    last_extraction_error: Exception | None = None
-
-    for parent_chunk in parent_chunks:
-        try:
-            result = await extract_entities_and_relationships(parent_chunk.content)
-        except Exception as exc:
-            failed_extractions += 1
-            last_extraction_error = exc
-            logger.warning(
-                "Failed to extract entities from chunk %d, skipping",
-                parent_chunk.id,
-                exc_info=True,
-            )
-            continue
+    for index, parent_chunk in enumerate(parent_chunks, start=1):
+        # Provider errors must not produce a partially extracted COMPLETED document.
+        result = await extract_entities_and_relationships(parent_chunk.content)
+        logger.info(
+            "Document %d: extracted graph chunk %d/%d",
+            document_id,
+            index,
+            len(parent_chunks),
+        )
 
         for extracted in result.entities:
             key = extracted.name.lower().strip()
@@ -142,11 +139,6 @@ async def process_document_graph(
                     "chunk_id": parent_chunk.id,
                 }
             )
-
-    if failed_extractions == len(parent_chunks):
-        raise RuntimeError(
-            f"Entity extraction failed for all {len(parent_chunks)} parent chunks"
-        ) from last_extraction_error
 
     # Flush so entities receive their DB-assigned IDs
     await session.flush()

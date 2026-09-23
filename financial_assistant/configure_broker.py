@@ -1,5 +1,7 @@
 """Declare the ingestion and dead-letter queues before starting workers."""
 
+from contextlib import closing
+
 from .core.celery_app import celery_app
 from .core.messaging import declare_ingestion_topology
 
@@ -10,7 +12,7 @@ def main() -> None:
         transport_options={"read_timeout": 5, "write_timeout": 5},
     ) as connection:
         connection.ensure_connection(max_retries=3)
-        with connection.channel() as channel:
+        with closing(connection.channel()) as channel:
             declare_ingestion_topology(channel)
 
 

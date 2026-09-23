@@ -11,7 +11,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.db import get_session
-from ...core.document_storage import delete_document_file, store_document_file
+from ...core.document_storage import (
+    delete_document_file,
+    lock_document_storage,
+    store_document_file,
+)
 from ...models import Document, DocumentOutbox, User
 from ...schemas.document import DocumentCreate, DocumentRead
 from ..dependencies.auth import get_current_user
@@ -67,6 +71,7 @@ async def upload_document(
         # Flush assigns the database ID used as the storage key without committing yet.
         await session.flush()
         document_id = db_document.id
+        await lock_document_storage(session, document_id)
         await store_document_file(document_id, file_bytes)
         stored = True
         session.add(DocumentOutbox(document_id=document_id))

@@ -3,7 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
 
-from pydantic import SecretStr, computed_field
+from pydantic import Field, SecretStr, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,8 +28,10 @@ class Settings(BaseSettings):
     rabbitmq_port: int | None = 5672
 
     rabbitmq_url_override: SecretStr | None = None
+    rabbitmq_management_port: int = Field(default=15672, ge=1, le=65535)
 
     document_storage_path: Path = Path("data/documents")
+    ai_request_timeout_seconds: float = Field(default=120, gt=0, allow_inf_nan=False)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -1,9 +1,14 @@
+import uuid
 from collections.abc import AsyncGenerator
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from pydantic import SecretStr
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from tests.utils import DocumentFactory, TokenFactory, UserFactory
 
 from financial_assistant.api.server import app
@@ -12,6 +17,32 @@ from financial_assistant.core.db import get_session
 from financial_assistant.models import Base, Document, User
 from financial_assistant.models.document import DocumentStatus, DocumentType
 from financial_assistant.utils import create_access_token, hash_password
+
+
+@pytest_asyncio.fixture
+async def private_database():
+    # Subprocesses share this search path, isolated from existing application rows.
+    schema = "ingestion_test_" + uuid.uuid4().hex
+    url = (
+        make_url(get_settings().database_url)
+        .update_query_dict({"options": f"-csearch_path={schema},public"})
+        .render_as_string(hide_password=False)
+    )
+    engine = create_async_engine(
+        url, execution_options={"schema_translate_map": {None: schema}}
+    )
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+            await connection.run_sync(Base.metadata.create_all)
+        yield SimpleNamespace(
+            url=SecretStr(url),
+            factory=async_sessionmaker(engine, expire_on_commit=False),
+        )
+    finally:
+        async with engine.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        await engine.dispose()
 
 
 @pytest_asyncio.fixture(name="session")

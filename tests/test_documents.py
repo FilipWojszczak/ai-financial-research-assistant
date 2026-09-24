@@ -173,6 +173,7 @@ async def test_upload_failure_cleans_up_only_before_commit(failure_stage):
         headers=Headers({"content-type": "application/pdf"}),
     )
     session = MagicMock()
+    session.scalar = AsyncMock()
 
     async def assign_document_id():
         if session.flush.await_count == 1:

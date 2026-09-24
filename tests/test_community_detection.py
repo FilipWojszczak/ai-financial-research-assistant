@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -194,59 +195,34 @@ async def test_process_document_communities_skips_singleton_communities():
     assert len(memberships) == 2
 
 
-async def test_process_document_communities_uses_fallback_summary_on_llm_failure(
-    caplog,
-):
-    """LLM failure during summarisation falls back to a generic title and summary."""
+async def test_community_summary_failure_propagates_for_retry():
     entities = [_make_entity(1, "Apple"), _make_entity(2, "Tim Cook")]
-    relationships = [_make_relationship(1, 2, "CEO_OF")]
-    session, added_objects = _make_session(relationships)
-
+    session, added = _make_session([_make_relationship(1, 2, "CEO_OF")])
     with (
         patch(
             "financial_assistant.ai.community_detection._generate_community_summary",
             new=AsyncMock(side_effect=RuntimeError("LLM unavailable")),
         ),
-        patch(
-            "financial_assistant.ai.community_detection._embeddings_model"
-        ) as mock_embed,
+        pytest.raises(RuntimeError, match="LLM unavailable"),
     ):
-        mock_embed.aembed_documents = AsyncMock(return_value=[[0.1] * 768])
-        await process_document_communities(session, document_id=1, entities=entities)
-
-    communities = [o for o in added_objects if isinstance(o, GraphCommunity)]
-    assert len(communities) == 1
-    assert communities[0].title == "Community of 2 entities"
-    assert communities[0].summary == "A cluster of 2 related financial entities."
-    warning_record = next(
-        record
-        for record in caplog.records
-        if record.getMessage() == "Failed to summarise a community for document 1"
-    )
-    assert warning_record.exc_info is not None
+        await process_document_communities(session, 1, entities)
+    assert added == []
 
 
-async def test_process_document_communities_uses_none_embedding_on_embed_failure():
-    """Embedding API failure stores None and still persists the community."""
+async def test_community_embedding_failure_propagates_for_retry():
     entities = [_make_entity(1, "Apple"), _make_entity(2, "Tim Cook")]
-    relationships = [_make_relationship(1, 2, "CEO_OF")]
-    session, added_objects = _make_session(relationships)
-
+    session, added = _make_session([_make_relationship(1, 2, "CEO_OF")])
     with (
         patch(
             "financial_assistant.ai.community_detection._generate_community_summary",
             new=AsyncMock(return_value=("Title", "Summary")),
         ),
-        patch(
-            "financial_assistant.ai.community_detection._embeddings_model"
-        ) as mock_embed,
+        patch("financial_assistant.ai.community_detection._embeddings_model") as model,
+        pytest.raises(RuntimeError, match="embed error"),
     ):
-        mock_embed.aembed_documents = AsyncMock(side_effect=RuntimeError("embed error"))
-        await process_document_communities(session, document_id=1, entities=entities)
-
-    communities = [o for o in added_objects if isinstance(o, GraphCommunity)]
-    assert len(communities) == 1
-    assert communities[0].embedding is None
+        model.aembed_documents = AsyncMock(side_effect=RuntimeError("embed error"))
+        await process_document_communities(session, 1, entities)
+    assert added == []
 
 
 async def test_process_document_communities_falls_back_to_greedy_on_louvain_failure():

@@ -1,9 +1,12 @@
+import asyncio
+import threading
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from financial_assistant.core.document_storage import (
+    _write_atomically,
     delete_document_file,
     document_file_path,
     store_document_file,
@@ -36,6 +39,40 @@ async def test_store_document_file_atomically_replaces_existing_source(tmp_path)
 
     assert (tmp_path / "42.pdf").read_bytes() == b"new"
     assert list(tmp_path.iterdir()) == [tmp_path / "42.pdf"]
+
+
+async def test_cancelled_upload_waits_for_its_filesystem_write(tmp_path):
+    started = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+
+    def delayed_write(destination, contents):
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(5), "Test did not release the file writer"
+        _write_atomically(destination, contents)
+
+    with (
+        patch(
+            "financial_assistant.core.document_storage.get_settings",
+            return_value=_settings(tmp_path),
+        ),
+        patch(
+            "financial_assistant.core.document_storage._write_atomically",
+            side_effect=delayed_write,
+        ),
+    ):
+        upload = asyncio.create_task(store_document_file(42, b"source"))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            upload.cancel()
+            await asyncio.sleep(0)
+            assert not upload.done()
+        finally:
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await upload
+    assert (tmp_path / "42.pdf").read_bytes() == b"source"
+    assert len(list(tmp_path.iterdir())) == 1
 
 
 async def test_delete_document_file_is_idempotent(tmp_path):

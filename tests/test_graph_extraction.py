@@ -181,34 +181,19 @@ async def test_process_document_graph_skips_unknown_relationship_entities():
     assert relationship_objects == []
 
 
-async def test_process_document_graph_tolerates_chunk_extraction_failure(caplog):
-    """If a chunk's LLM call raises, processing continues with remaining chunks."""
-    chunk_a = _make_chunk(1)
-    chunk_b = _make_chunk(2)
-    extraction_b = _make_extraction_result([("Microsoft", "COMPANY")], [])
-
+async def test_graph_failure_propagates_without_skipping_a_chunk():
     session = AsyncMock(spec=AsyncSession)
-    session.flush = AsyncMock()
-    session.add = MagicMock()
-
-    with patch(
-        "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
-        new=AsyncMock(side_effect=[RuntimeError("LLM error"), extraction_b]),
+    extraction = _make_extraction_result([("Microsoft", "COMPANY")], [])
+    with (
+        patch(
+            "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
+            new=AsyncMock(side_effect=[RuntimeError("LLM error"), extraction]),
+        ) as extract,
+        pytest.raises(RuntimeError, match="LLM error"),
     ):
-        entities = await process_document_graph(
-            session=session,
-            document_id=1,
-            parent_chunks=[chunk_a, chunk_b],
-        )
-
-    assert len(entities) == 1
-    assert entities[0].name == "Microsoft"
-    warning_record = next(
-        record
-        for record in caplog.records
-        if record.getMessage() == "Failed to extract entities from chunk 1, skipping"
-    )
-    assert warning_record.exc_info is not None
+        await process_document_graph(session, 1, [_make_chunk(1), _make_chunk(2)])
+    assert extract.await_count == 1
+    session.flush.assert_not_awaited()
 
 
 async def test_process_document_graph_rejects_empty_parent_chunks():
@@ -221,24 +206,14 @@ async def test_process_document_graph_rejects_empty_parent_chunks():
     session.flush.assert_not_awaited()
 
 
-async def test_process_document_graph_raises_when_all_extractions_fail():
-    """A systemic extraction failure must fail the graph instead of returning empty."""
-    chunks = [_make_chunk(1), _make_chunk(2)]
+async def test_graph_timeout_propagates_for_retry():
     session = AsyncMock(spec=AsyncSession)
-    last_error = TimeoutError("provider timed out")
-
     with (
         patch(
             "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
-            new=AsyncMock(side_effect=[RuntimeError("provider error"), last_error]),
+            new=AsyncMock(side_effect=TimeoutError("provider timed out")),
         ),
-        pytest.raises(RuntimeError, match="failed for all 2 parent chunks") as exc_info,
+        pytest.raises(TimeoutError),
     ):
-        await process_document_graph(
-            session=session,
-            document_id=1,
-            parent_chunks=chunks,
-        )
-
-    assert exc_info.value.__cause__ is last_error
+        await process_document_graph(session, 1, [_make_chunk(1)])
     session.flush.assert_not_awaited()

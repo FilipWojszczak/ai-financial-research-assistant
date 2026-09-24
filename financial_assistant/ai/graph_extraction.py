@@ -22,7 +22,7 @@ class ExtractedEntity(BaseModel):
         "COMPANY", "PERSON", "FINANCIAL_METRIC", "EVENT", "PRODUCT", "LOCATION", "OTHER"
     ] = Field(description="The category of entity")
     description: str | None = Field(
-        None,
+        default=None,
         description="One sentence describing the entity's relevance in this context",
     )
 
@@ -36,7 +36,7 @@ class ExtractedRelationship(BaseModel):
         )
     )
     description: str | None = Field(
-        None, description="One sentence describing this relationship"
+        default=None, description="One sentence describing this relationship"
     )
 
 

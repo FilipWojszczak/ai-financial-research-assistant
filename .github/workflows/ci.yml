@@ -19,6 +19,7 @@ jobs:
       POSTGRES_PORT: 5432
       GOOGLE_API_KEY: mock-google-api-key-for-testing
       RUN_RABBITMQ_TESTS: "1"
+      RUN_INGESTION_TESTS: "1"
       RABBITMQ_URL_OVERRIDE: amqp://test_user:test_password@localhost:5672/test_vhost
     services:
       rabbitmq:
@@ -29,6 +30,7 @@ jobs:
           RABBITMQ_DEFAULT_VHOST: test_vhost
         ports:
           - 5672:5672
+          - 15672:15672
         options: >-
           --health-cmd "rabbitmq-diagnostics -q ping"
           --health-interval 5s

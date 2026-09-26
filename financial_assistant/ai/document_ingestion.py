@@ -10,7 +10,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf.errors import PdfReadError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..core.db import async_session_maker
 from ..core.document_storage import document_file_path
 from ..models.document import ChildChunk, Document, DocumentStatus, ParentChunk
 from .community_detection import process_document_communities
@@ -107,12 +106,11 @@ async def generate_child_embeddings(
 async def _mark_document_failed(
     document_id: int,
     *,
-    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Best-effort terminal status update after the attempt has rolled back."""
-    factory = session_factory if session_factory is not None else async_session_maker
     try:
-        async with factory() as status_session:
+        async with session_factory() as status_session:
             # Wait for a competing attempt and inspect its committed status. A late
             # failure must never overwrite another attempt's COMPLETED result.
             document = await status_session.get(
@@ -131,11 +129,10 @@ async def _mark_document_failed(
 async def ingest_document(
     document_id: int,
     *,
-    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Run one transactional attempt; propagate failures to the caller."""
-    factory = session_factory if session_factory is not None else async_session_maker
-    async with factory() as session:
+    async with session_factory() as session:
         try:
             # Hold the row lock through the commit. Duplicate deliveries wait, then
             # see the first attempt's result. A crash releases the lock on disconnect.

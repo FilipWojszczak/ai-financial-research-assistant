@@ -31,12 +31,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and run the installation script for 'uv'
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Add the directory where 'uv' was installed to the system PATH variable.
-# This allows us to use the 'uv' command directly in the container's terminal without providing the full path.
-ENV PATH="/root/.local/bin:$PATH"
+# Download and run the installation script for 'uv'.
+# UV_INSTALL_DIR puts the binaries in /usr/local/bin (already on PATH), so 'uv' is available
+# to every user, including the non-root devcontainer user, not only to root.
+# UV_NO_MODIFY_PATH skips editing root's shell profile, which is unnecessary here.
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 
 # The '*' after uv.lock means this file will be copied if it exists, but if it doesn't, Docker won't throw an error.
 COPY pyproject.toml uv.lock* ./

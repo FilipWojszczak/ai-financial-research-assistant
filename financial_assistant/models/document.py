@@ -62,6 +62,7 @@ class Document(Base):
         ),
         nullable=False,
         default=DocumentStatus.PROCESSING,
+        server_default=DocumentStatus.PROCESSING.value,
     )
 
     # when owner_id is None, it means the document is public and can be accessed by any

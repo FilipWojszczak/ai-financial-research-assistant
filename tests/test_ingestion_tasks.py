@@ -5,8 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from celery.exceptions import Reject, Retry
 from celery.result import EagerResult
+from tests.utils import provider_error
 
 from financial_assistant.ai.document_ingestion import (
+    INGESTION_LOCK,
     InvalidDocumentError,
     _mark_document_failed,
     ingest_document,
@@ -111,6 +113,27 @@ def test_invalid_pdf_is_not_retried():
     assert attempt.await_count == 1
 
 
+def test_provider_rejection_is_not_retried():
+    """A 4xx answer repeats on every attempt; retrying only repeats all model calls."""
+    attempt = AsyncMock(side_effect=provider_error(400))
+    with patch(f"{_TASK_MODULE}._run_attempt", new=attempt):
+        result = ingest_task.apply(args=(42,), throw=True)
+    assert result.state == "REJECTED"
+    assert isinstance(result.result, Reject)
+    assert result.result.requeue is False
+    assert attempt.await_count == 1
+
+
+def test_provider_rate_limit_is_retried():
+    error = provider_error(429)
+    with (
+        patch(f"{_TASK_MODULE}._run_attempt", new=AsyncMock(side_effect=error)),
+        pytest.raises(Retry) as retry,
+    ):
+        ingest_task.apply(args=(42,), retries=0, throw=True)
+    assert retry.value.exc is error
+
+
 @pytest.mark.parametrize("document_id", [0, -1, "42", True, None])
 def test_invalid_message_is_rejected_before_opening_resources(document_id):
     with (
@@ -145,6 +168,8 @@ def test_sequential_tasks_share_worker_event_loop():
         (ConnectionError("unavailable"), False, False),
         (ConnectionError("unavailable"), True, True),
         (InvalidDocumentError("invalid PDF"), False, True),
+        (provider_error(400), False, True),
+        (provider_error(429), False, False),
         (asyncio.CancelledError(), False, False),
     ],
 )
@@ -196,7 +221,7 @@ async def test_terminal_or_deleted_document_skips_all_processing(status):
         f"{_PIPELINE_MODULE}.load_pdf_documents", new_callable=AsyncMock
     ) as load:
         await ingest_document(42, session_factory=factory)
-    session.get.assert_awaited_once_with(Document, 42, with_for_update=True)
+    session.get.assert_awaited_once_with(Document, 42, with_for_update=INGESTION_LOCK)
     load.assert_not_awaited()
     session.add_all.assert_not_called()
 

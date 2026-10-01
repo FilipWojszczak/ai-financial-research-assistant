@@ -1,4 +1,5 @@
 from .base import Base
+from .checkpoint import CheckpointKind, IngestionCheckpoint
 from .document import ChildChunk, Document, ParentChunk
 from .graph import (
     Entity,
@@ -12,6 +13,7 @@ from .user import User
 
 __all__ = [
     "Base",
+    "CheckpointKind",
     "ChildChunk",
     "Document",
     "DocumentOutbox",
@@ -20,6 +22,7 @@ __all__ = [
     "EntityType",
     "GraphCommunity",
     "GraphCommunityMembership",
+    "IngestionCheckpoint",
     "ParentChunk",
     "User",
 ]

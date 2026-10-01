@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..core.document_storage import document_file_path
 from ..models.document import ChildChunk, Document, DocumentStatus, ParentChunk
+from .checkpoints import AttemptCheckpoints, delete_checkpoints
 from .community_detection import process_document_communities
 from .graph_extraction import process_document_graph
 from .requests import embed_texts
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 embeddings_model = GoogleGenerativeAIEmbeddings(
     model="models/gemini-embedding-001", output_dimensionality=768
 )
+
+
+# SQLAlchemy renders key_share=True as SELECT ... FOR NO KEY UPDATE on PostgreSQL.
+INGESTION_LOCK = {"key_share": True}
 
 
 class InvalidDocumentError(ValueError):
@@ -136,7 +141,11 @@ async def ingest_document(
         try:
             # Hold the row lock through the commit. Duplicate deliveries wait, then
             # see the first attempt's result. A crash releases the lock on disconnect.
-            document = await session.get(Document, document_id, with_for_update=True)
+            # NO KEY UPDATE (not UPDATE) still excludes competing attempts, but lets
+            # checkpoint rows referencing this document commit in their own sessions.
+            document = await session.get(
+                Document, document_id, with_for_update=INGESTION_LOCK
+            )
             if document is None or document.status != DocumentStatus.PROCESSING:
                 return
 
@@ -186,10 +195,25 @@ async def ingest_document(
             session.add_all(db_children)
             await session.flush()
 
+            # Model results from earlier failed attempts are reused; new ones are
+            # committed as they arrive, so a retry does not repeat them.
+            checkpoints = AttemptCheckpoints(document_id, session_factory)
             # Extract entities/relationships and build the knowledge graph
-            entities = await process_document_graph(session, document_id, db_parents)
-            await process_document_communities(session, document_id, entities)
+            entities = await process_document_graph(
+                session, document_id, db_parents, checkpoints
+            )
+            await process_document_communities(
+                session, document_id, entities, checkpoints
+            )
+            if checkpoints.hits:
+                logger.info(
+                    "Document %d: reused %d results from earlier attempts",
+                    document_id,
+                    checkpoints.hits,
+                )
 
+            # Checkpoints are only needed until the document completes.
+            await delete_checkpoints(session, document_id)
             # Update document status to COMPLETED
             document.status = DocumentStatus.COMPLETED
             await session.commit()

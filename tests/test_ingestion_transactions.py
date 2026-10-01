@@ -1,18 +1,26 @@
 """Exercise transaction and duplicate-delivery behavior against PostgreSQL."""
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.messages import AIMessage
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from financial_assistant.ai.checkpoints import AttemptCheckpoints
 from financial_assistant.ai.document_ingestion import (
     _mark_document_failed,
     ingest_document,
 )
+from financial_assistant.ai.graph_extraction import (
+    ExtractedEntity,
+    ExtractedRelationship,
+    ExtractionResult,
+)
 from financial_assistant.core.config import get_settings
+from financial_assistant.models.checkpoint import CheckpointKind, IngestionCheckpoint
 from financial_assistant.models.document import (
     ChildChunk,
     Document,
@@ -189,3 +197,98 @@ async def test_concurrent_deliveries_serialize_on_document_lock(
         )
     await assert_document_state(factory, document_id, DocumentStatus.COMPLETED, 1)
     assert load.await_count == 1
+
+
+async def count_checkpoints(factory, document_id):
+    async with factory() as check:
+        return await check.scalar(
+            select(func.count())
+            .select_from(IngestionCheckpoint)
+            .where(IngestionCheckpoint.document_id == document_id)
+        )
+
+
+@pytest.fixture
+def graph_pipeline_with_fake_models():
+    """Real graph and community code against PostgreSQL; only model calls are fake."""
+    parents = [{"chunk_index": 0, "content": "Tim Cook is the CEO of Apple."}]
+    children = [{**parents[0], "parent_index": 0, "embedding": [0.1] * 768}]
+    extraction = ExtractionResult(
+        entities=[
+            ExtractedEntity(name="Apple", type="COMPANY"),
+            ExtractedEntity(name="Tim Cook", type="PERSON"),
+        ],
+        relationships=[
+            ExtractedRelationship(
+                source="Tim Cook", target="Apple", relationship_type="CEO_OF"
+            )
+        ],
+    )
+    summary_llm = MagicMock()
+    summary_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content="TITLE: Apple leadership\nSUMMARY: Tim Cook.")
+    )
+    summary_embeddings = MagicMock()
+    summary_embeddings.aembed_documents = AsyncMock(return_value=[[0.2] * 768])
+    with (
+        patch(f"{_MODULE}.load_pdf_documents", new=AsyncMock(return_value=[object()])),
+        patch(
+            f"{_MODULE}.split_into_parent_and_child_chunks",
+            return_value=(parents, children),
+        ),
+        patch(
+            f"{_MODULE}.generate_child_embeddings", new=AsyncMock(return_value=children)
+        ),
+        patch(
+            "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
+            new=AsyncMock(return_value=extraction),
+        ) as extract,
+        patch("financial_assistant.ai.community_detection._summary_llm", summary_llm),
+        patch(
+            "financial_assistant.ai.community_detection._embeddings_model",
+            summary_embeddings,
+        ),
+    ):
+        yield extract, summary_llm.ainvoke, summary_embeddings.aembed_documents
+
+
+async def test_retry_reuses_model_results_committed_by_failed_attempt(
+    committed_document, graph_pipeline_with_fake_models
+):
+    factory, document_id = committed_document
+    extract, summarize, embed_summaries = graph_pipeline_with_fake_models
+    # Fail at the very last model call, after extraction and summary succeeded.
+    embed_summaries.side_effect = ConnectionError("embedding unavailable")
+
+    with pytest.raises(ConnectionError):
+        await ingest_document(document_id, session_factory=factory)
+
+    # The attempt rolled back, but its model results were committed separately while
+    # it held the document lock (this would hang if the lock blocked the FK check).
+    await assert_document_state(factory, document_id, DocumentStatus.PROCESSING, 0)
+    assert await count_checkpoints(factory, document_id) == 2
+
+    embed_summaries.side_effect = None
+    embed_summaries.return_value = [[0.2] * 768]
+    await ingest_document(document_id, session_factory=factory)
+
+    await assert_document_state(factory, document_id, DocumentStatus.COMPLETED, 1)
+    assert extract.await_count == 1
+    assert summarize.await_count == 1
+    assert embed_summaries.await_count == 2
+    # Completing the document removes its checkpoints in the same transaction.
+    assert await count_checkpoints(factory, document_id) == 0
+
+
+async def test_checkpoints_are_deleted_with_their_document(committed_document):
+    factory, document_id = committed_document
+    await AttemptCheckpoints(document_id, factory).put(
+        CheckpointKind.GRAPH_EXTRACTION, "key", {"ok": True}
+    )
+    assert await AttemptCheckpoints(document_id, factory).get(
+        CheckpointKind.GRAPH_EXTRACTION, "key"
+    ) == {"ok": True}
+    async with factory() as cleanup:
+        await cleanup.execute(delete(Document).where(Document.id == document_id))
+        await cleanup.commit()
+    assert await count_checkpoints(factory, document_id) == 0

@@ -1,10 +1,15 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.utils import provider_error
 
-from financial_assistant.ai.requests import ai_request, embed_texts
+from financial_assistant.ai.requests import (
+    ai_request,
+    embed_texts,
+    is_permanent_provider_error,
+)
 
 
 async def test_ai_deadline_cancels_the_pending_call():
@@ -44,3 +49,32 @@ async def test_embedding_deadline_applies_to_each_batch_not_total_work():
     assert all(
         len(call.args[0]) <= 16 for call in model.aembed_documents.await_args_list
     )
+
+
+async def test_embed_texts_rejects_blank_texts_before_calling_the_model():
+    model = MagicMock()
+    model.aembed_documents = AsyncMock()
+
+    with pytest.raises(ValueError, match=r"positions \[1\]"):
+        await embed_texts(model, ["ok", "  "])
+
+    model.aembed_documents.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("error", "permanent"),
+    [
+        (provider_error(400), True),  # e.g. "content contains an empty Part"
+        (provider_error(401), True),
+        (provider_error(403), True),
+        (provider_error(404), True),
+        (provider_error(408), False),
+        (provider_error(429), False),  # rate limit / quota
+        (provider_error(500), False),
+        (provider_error(503), False),
+        (ConnectionError("network down"), False),
+        (TimeoutError(), False),
+    ],
+)
+def test_only_provider_rejections_are_permanent(error, permanent):
+    assert is_permanent_provider_error(error) is permanent

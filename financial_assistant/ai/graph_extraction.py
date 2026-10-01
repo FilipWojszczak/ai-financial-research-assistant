@@ -5,14 +5,17 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..models.checkpoint import CheckpointKind
 from ..models.document import ParentChunk
 from ..models.graph import Entity, EntityRelationship, EntityType
+from .checkpoints import AttemptCheckpoints, checkpoint_key
 from .requests import ai_request
 
 logger = logging.getLogger(__name__)
 
+_EXTRACTION_MODEL = "gemini-3.6-flash"
 _extraction_llm = ChatGoogleGenerativeAI(
-    model="gemini-3.6-flash", temperature=0, max_retries=1
+    model=_EXTRACTION_MODEL, temperature=0, max_retries=1
 )
 
 
@@ -90,10 +93,28 @@ async def extract_entities_and_relationships(chunk_text: str) -> ExtractionResul
     return result  # type: ignore[return-value]
 
 
+async def _extract_with_checkpoint(
+    chunk_text: str, checkpoints: AttemptCheckpoints | None
+) -> ExtractionResult:
+    """Reuse the extraction from an earlier failed attempt of the same document."""
+    if checkpoints is None:
+        return await extract_entities_and_relationships(chunk_text)
+    key = checkpoint_key(_EXTRACTION_MODEL, _EXTRACTION_PROMPT.format(text=chunk_text))
+    cached = await checkpoints.get(CheckpointKind.GRAPH_EXTRACTION, key)
+    if cached is not None:
+        return ExtractionResult.model_validate(cached)
+    result = await extract_entities_and_relationships(chunk_text)
+    await checkpoints.put(
+        CheckpointKind.GRAPH_EXTRACTION, key, result.model_dump(mode="json")
+    )
+    return result
+
+
 async def process_document_graph(
     session: AsyncSession,
     document_id: int,
     parent_chunks: list[ParentChunk],
+    checkpoints: AttemptCheckpoints | None = None,
 ) -> list[Entity]:
     """
     Extract entities and relationships from all parent chunks of a document,
@@ -109,7 +130,7 @@ async def process_document_graph(
     pending_relationships: list[dict] = []
     for index, parent_chunk in enumerate(parent_chunks, start=1):
         # Provider errors must not produce a partially extracted COMPLETED document.
-        result = await extract_entities_and_relationships(parent_chunk.content)
+        result = await _extract_with_checkpoint(parent_chunk.content, checkpoints)
         logger.info(
             "Document %d: extracted graph chunk %d/%d",
             document_id,

@@ -94,6 +94,53 @@ async def test_generate_community_summary_falls_back_when_format_not_followed():
     assert summary == "Some unstructured response"
 
 
+@pytest.mark.parametrize(
+    ("content", "expected_title", "expected_summary"),
+    [
+        (
+            "TITLE: Cloud Growth\nSUMMARY:\nGoogle Cloud grew.\nTPUs scaled.",
+            "Cloud Growth",
+            "Google Cloud grew. TPUs scaled.",
+        ),
+        (
+            "**TITLE:** Cloud Growth\n**SUMMARY:** Google Cloud grew.",
+            "Cloud Growth",
+            "Google Cloud grew.",
+        ),
+        (
+            "## Title: Cloud Growth\nsummary: Google Cloud grew.",
+            "Cloud Growth",
+            "Google Cloud grew.",
+        ),
+    ],
+)
+async def test_generate_community_summary_tolerates_format_variants(
+    content, expected_title, expected_summary
+):
+    with patch("financial_assistant.ai.community_detection._summary_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=content))
+        title, summary = await _generate_community_summary([_make_entity(1)], [])
+
+    assert (title, summary) == (expected_title, expected_summary)
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["", "   ", "TITLE: Cloud Growth", "TITLE: Cloud Growth\nSUMMARY:"],
+)
+async def test_generate_community_summary_never_returns_empty_summary(content):
+    """An empty summary would make the embedding call fail with HTTP 400."""
+    entities = [_make_entity(1, "Alphabet"), _make_entity(2, "Google Cloud")]
+    relationships = [_make_relationship(1, 2, "OWNS")]
+
+    with patch("financial_assistant.ai.community_detection._summary_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=content))
+        title, summary = await _generate_community_summary(entities, relationships)
+
+    assert title
+    assert summary == "Related entities: Alphabet, Google Cloud. Relationships: OWNS."
+
+
 # ---------------------------------------------------------------------------
 # process_document_communities - mocked LLM, embeddings, and session
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from financial_assistant.ai.document_ingestion import (
+    INGESTION_LOCK,
     InvalidDocumentError,
     generate_child_embeddings,
 )
@@ -21,6 +22,7 @@ def attempt():
     processing.flush = AsyncMock()
     processing.rollback = AsyncMock()
     processing.commit = AsyncMock()
+    processing.execute = AsyncMock()
     status = MagicMock()
     status.get = AsyncMock(return_value=MagicMock(status=DocumentStatus.PROCESSING))
     status.commit = AsyncMock()
@@ -92,7 +94,10 @@ async def test_terminal_failure_rolls_back_before_fresh_status_update(
     assert events == ["rollback", "status_commit"]
     assert factory.call_count == 2
     processing.commit.assert_not_awaited()
-    processing.get.assert_awaited_once_with(Document, 42, with_for_update=True)
+    processing.get.assert_awaited_once_with(
+        Document, 42, with_for_update=INGESTION_LOCK
+    )
+    # The status session only runs after rollback, so it may block competitors fully.
     status.get.assert_awaited_once_with(Document, 42, with_for_update=True)
     assert status.get.return_value.status == DocumentStatus.FAILED
     engine.dispose.assert_awaited_once()
@@ -103,6 +108,11 @@ async def test_success_commits_completed_without_status_session(attempt):
     await _run_attempt(42, final_attempt=False)
     assert processing.get.return_value.status == DocumentStatus.COMPLETED
     assert processing.flush.await_count == 2
+    # Checkpoints are deleted in the same transaction that marks the document done.
+    processing.execute.assert_awaited_once()
+    assert "DELETE FROM ingestion_checkpoint" in str(
+        processing.execute.await_args.args[0]
+    )
     processing.commit.assert_awaited_once()
     processing.rollback.assert_not_awaited()
     factory.assert_called_once()

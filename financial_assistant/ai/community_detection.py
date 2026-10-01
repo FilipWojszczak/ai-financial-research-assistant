@@ -1,22 +1,26 @@
 import logging
+import re
 
 import networkx as nx
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..models.checkpoint import CheckpointKind
 from ..models.graph import (
     Entity,
     EntityRelationship,
     GraphCommunity,
     GraphCommunityMembership,
 )
+from .checkpoints import AttemptCheckpoints, checkpoint_key
 from .requests import ai_request, embed_texts
 
 logger = logging.getLogger(__name__)
 
+_SUMMARY_MODEL = "gemini-3.6-flash"
 _summary_llm = ChatGoogleGenerativeAI(
-    model="gemini-3.6-flash", temperature=0, max_retries=1
+    model=_SUMMARY_MODEL, temperature=0, max_retries=1
 )
 _embeddings_model = GoogleGenerativeAIEmbeddings(
     model="models/gemini-embedding-001", output_dimensionality=768
@@ -42,40 +46,102 @@ SUMMARY: <summary>
 async def _generate_community_summary(
     entities: list[Entity],
     relationships: list[EntityRelationship],
+    checkpoints: AttemptCheckpoints | None = None,
 ) -> tuple[str, str]:
+    # Sorted, so a retry builds the same prompt (and checkpoint key) even though
+    # entity IDs and set iteration order differ between attempts.
     entity_lines = "\n".join(
-        f"- {e.name} ({e.type}): {e.description or 'no description'}" for e in entities
+        sorted(
+            f"- {e.name} ({e.type}): {e.description or 'no description'}"
+            for e in entities
+        )
+    )
+    ordered_relationships = sorted(
+        relationships, key=lambda r: (r.relationship_type, r.description or "")
     )
     rel_lines = (
         "\n".join(
             f"- {r.relationship_type}: {r.description or ''}"
-            for r in relationships[:10]  # cap to avoid prompt blowout
+            for r in ordered_relationships[:10]  # cap to avoid prompt blowout
         )
         or "None identified"
     )
+    prompt = _SUMMARY_PROMPT.format(entities=entity_lines, relationships=rel_lines)
 
-    response = await ai_request(
-        _summary_llm.ainvoke(
-            _SUMMARY_PROMPT.format(entities=entity_lines, relationships=rel_lines)
+    key = checkpoint_key(_SUMMARY_MODEL, prompt)
+    if checkpoints is not None:
+        cached = await checkpoints.get(CheckpointKind.COMMUNITY_SUMMARY, key)
+        if cached is not None:
+            return cached["title"], cached["summary"]
+
+    response = await ai_request(_summary_llm.ainvoke(prompt))
+    title, summary = _parse_summary_response(response.text)
+    if not summary:
+        # The summary is embedded next, and the embedding API rejects empty input.
+        # A retry would repeat the whole document, so fall back deterministically.
+        logger.warning(
+            "Community summary response had no usable summary; using entity fallback"
         )
-    )
-    content = response.text.strip()
+        summary = _fallback_summary(entities, ordered_relationships)
+    title = title or "Community"
 
-    title = "Community"
-    summary = content
-    for line in content.splitlines():
-        if line.startswith("TITLE:"):
-            title = line[6:].strip()
-        elif line.startswith("SUMMARY:"):
-            summary = line[8:].strip()
-
+    if checkpoints is not None:
+        await checkpoints.put(
+            CheckpointKind.COMMUNITY_SUMMARY, key, {"title": title, "summary": summary}
+        )
     return title, summary
+
+
+_LABEL = re.compile(r"^[\s#>*_`-]*(TITLE|SUMMARY)[\s*_`]*:[\s*_`]*(.*)$", re.IGNORECASE)
+
+
+def _parse_summary_response(content: str) -> tuple[str, str]:
+    """
+    Extract TITLE/SUMMARY from the model's text. Tolerates markdown decoration
+    (``**SUMMARY:**``), lowercase labels and a summary that starts on the next line.
+    Text without any labels is treated as the summary.
+    """
+    title = ""
+    summary_lines: list[str] = []
+    unlabelled: list[str] = []
+    section = None
+    for raw_line in content.strip().splitlines():
+        line = raw_line.strip()
+        match = _LABEL.match(line)
+        if match:
+            section = match[1].upper()
+            value = match[2].strip()
+            if section == "TITLE":
+                title = value
+            elif value:
+                summary_lines.append(value)
+        elif not line:
+            continue
+        elif section == "SUMMARY":
+            summary_lines.append(line)
+        elif section is None:
+            unlabelled.append(line)
+    summary = " ".join(summary_lines) or (" ".join(unlabelled) if not title else "")
+    return title, summary
+
+
+def _fallback_summary(
+    entities: list[Entity], relationships: list[EntityRelationship]
+) -> str:
+    names = ", ".join(sorted(e.name for e in entities)[:10])
+    relationship_types = ", ".join(
+        sorted({r.relationship_type for r in relationships})[:5]
+    )
+    if relationship_types:
+        return f"Related entities: {names}. Relationships: {relationship_types}."
+    return f"Related entities: {names}."
 
 
 async def process_document_communities(
     session: AsyncSession,
     document_id: int,
     entities: list[Entity],
+    checkpoints: AttemptCheckpoints | None = None,
 ) -> None:
     """
     Build a graph of entity relationships, detect communities with the Louvain
@@ -143,7 +209,7 @@ async def process_document_communities(
         ]
 
         title, summary = await _generate_community_summary(
-            community_entities, community_rels
+            community_entities, community_rels, checkpoints
         )
         logger.info(
             "Document %d: summarized community %d", document_id, len(community_data) + 1

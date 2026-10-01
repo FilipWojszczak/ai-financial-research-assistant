@@ -11,12 +11,18 @@ from ..ai.document_ingestion import (
     _mark_document_failed,
     ingest_document,
 )
+from ..ai.requests import is_permanent_provider_error
 from ..core.celery_app import celery_app
 from ..core.config import get_settings
 from ..core.messaging import INGESTION_TASK_NAME
 from .async_runner import get_worker_runner
 
 logger = logging.getLogger(__name__)
+
+
+def _is_permanent(exc: BaseException) -> bool:
+    """Failures that the same input reproduces, so retries only waste model calls."""
+    return isinstance(exc, InvalidDocumentError) or is_permanent_provider_error(exc)
 
 
 async def _run_attempt(document_id: int, *, final_attempt: bool) -> None:
@@ -28,7 +34,7 @@ async def _run_attempt(document_id: int, *, final_attempt: bool) -> None:
         try:
             await ingest_document(document_id, session_factory=session_factory)
         except Exception as exc:
-            if final_attempt or isinstance(exc, InvalidDocumentError):
+            if final_attempt or _is_permanent(exc):
                 await _mark_document_failed(
                     document_id, session_factory=session_factory
                 )
@@ -53,12 +59,13 @@ def ingest_document_task(self, document_id: int) -> None:
     final_attempt = self.request.retries >= self.max_retries
     try:
         get_worker_runner().run(_run_attempt(document_id, final_attempt=final_attempt))
-    except InvalidDocumentError as exc:
-        logger.exception(
-            "Invalid document %d; rejecting to dead-letter queue", document_id
-        )
-        raise Reject(str(exc), requeue=False) from exc
     except Exception as exc:
+        if _is_permanent(exc):
+            logger.exception(
+                "Document %d cannot succeed on retry; rejecting to dead-letter queue",
+                document_id,
+            )
+            raise Reject(str(exc), requeue=False) from exc
         if final_attempt:
             logger.exception(
                 "Document %d exhausted retries; rejecting to DLQ", document_id

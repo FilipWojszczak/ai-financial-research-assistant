@@ -29,6 +29,10 @@ class Settings(BaseSettings):
 
     rabbitmq_url_override: SecretStr | None = None
     rabbitmq_management_port: int = Field(default=15672, ge=1, le=65535)
+    # How long one ingestion message may stay unacknowledged. Tasks acknowledge only
+    # when they finish (acks_late), so this must exceed the longest document's
+    # ingestion. RabbitMQ's 30-minute default closes the channel of a healthy worker.
+    ingestion_consumer_timeout_seconds: int = Field(default=3 * 60 * 60, gt=0)
 
     document_storage_path: Path = Path("data/documents")
     ai_request_timeout_seconds: float = Field(default=120, gt=0, allow_inf_nan=False)

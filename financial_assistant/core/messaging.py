@@ -1,5 +1,8 @@
 """Shared RabbitMQ routing for document ingestion and parked failures."""
 
+import re
+from typing import Any
+
 from kombu import Exchange, Queue
 
 INGESTION_TASK_NAME = "financial_assistant.tasks.document_ingestion.ingest_document"
@@ -18,6 +21,23 @@ INGESTION_QUEUE_ARGUMENTS: dict[str, str | int] = {
     "x-dead-letter-strategy": "at-least-once",
     "x-overflow": "reject-publish",
 }
+
+INGESTION_POLICY_NAME = "document-ingestion"
+
+
+def ingestion_policy(consumer_timeout_seconds: int) -> dict[str, Any]:
+    """
+    RabbitMQ policy for the ingestion queue. A policy (not a queue argument) is used
+    because changing x-arguments of an existing queue fails its redeclaration.
+    Only one policy applies to a queue, so this one must carry every key it needs.
+    """
+    return {
+        "pattern": f"^{re.escape(INGESTION_QUEUE)}$",
+        "apply-to": "queues",
+        "priority": 10,
+        "definition": {"consumer-timeout": consumer_timeout_seconds * 1000},
+    }
+
 
 dead_letter_queue = Queue(
     DEAD_LETTER_QUEUE,

@@ -9,6 +9,7 @@ from tests.utils import provider_error
 
 from financial_assistant.ai.document_ingestion import (
     INGESTION_LOCK,
+    DocumentBusyError,
     InvalidDocumentError,
     _mark_document_failed,
     ingest_document,
@@ -21,6 +22,8 @@ from financial_assistant.tasks.async_runner import (
     get_worker_runner,
 )
 from financial_assistant.tasks.document_ingestion import (
+    BUSY_REDELIVERY_DELAY_SECONDS,
+    _redeliver_later,
     _run_attempt,
     ingest_document_task,
 )
@@ -113,6 +116,31 @@ def test_invalid_pdf_is_not_retried():
     assert attempt.await_count == 1
 
 
+@pytest.mark.parametrize("retries", [0, 3])
+def test_busy_document_is_requeued_without_spending_a_retry(retries):
+    """A duplicate is handed back to the queue, even on what would be the last try."""
+    attempt = AsyncMock(side_effect=DocumentBusyError("locked"))
+    with (
+        patch(f"{_TASK_MODULE}._run_attempt", new=attempt),
+        patch(f"{_TASK_MODULE}._redeliver_later") as redeliver,
+    ):
+        result = ingest_task.apply(args=(42,), retries=retries, throw=True)
+    assert result.successful()
+    assert attempt.await_count == 1
+    redeliver.assert_called_once()
+    assert redeliver.call_args.args[1] == BUSY_REDELIVERY_DELAY_SECONDS
+
+
+def test_redelivery_keeps_retry_count_and_delays_the_copy():
+    task = MagicMock()
+    task.request.retries = 2
+    _redeliver_later(task, 60)
+    task.signature_from_request.assert_called_once_with(
+        task.request, countdown=60, retries=2
+    )
+    task.signature_from_request.return_value.apply_async.assert_called_once_with()
+
+
 def test_provider_rejection_is_not_retried():
     """A 4xx answer repeats on every attempt; retrying only repeats all model calls."""
     attempt = AsyncMock(side_effect=provider_error(400))
@@ -170,6 +198,7 @@ def test_sequential_tasks_share_worker_event_loop():
         (InvalidDocumentError("invalid PDF"), False, True),
         (provider_error(400), False, True),
         (provider_error(429), False, False),
+        (DocumentBusyError("locked"), True, False),
         (asyncio.CancelledError(), False, False),
     ],
 )

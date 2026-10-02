@@ -11,6 +11,7 @@ from sqlalchemy.pool import NullPool
 
 from financial_assistant.ai.checkpoints import AttemptCheckpoints
 from financial_assistant.ai.document_ingestion import (
+    DocumentBusyError,
     _mark_document_failed,
     ingest_document,
 )
@@ -159,7 +160,7 @@ async def test_terminal_failure_is_persisted_and_skipped_on_redelivery(
     load.assert_not_awaited()
 
 
-async def test_concurrent_deliveries_serialize_on_document_lock(
+async def test_duplicate_delivery_does_not_wait_for_active_attempt(
     committed_document, fake_pipeline
 ):
     factory, document_id = committed_document
@@ -174,29 +175,41 @@ async def test_concurrent_deliveries_serialize_on_document_lock(
 
     load.side_effect = pause_first_attempt
     first = asyncio.create_task(ingest_document(document_id, session_factory=factory))
-    second = None
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
-        second = asyncio.create_task(
-            ingest_document(document_id, session_factory=factory)
-        )
-        # The second connection must not get past SELECT ... FOR UPDATE yet.
-        with pytest.raises(TimeoutError):
-            await asyncio.wait_for(asyncio.shield(second), timeout=0.2)
+        # The duplicate fails fast instead of holding a worker until the first ends.
+        with pytest.raises(DocumentBusyError):
+            await asyncio.wait_for(
+                ingest_document(document_id, session_factory=factory), timeout=2
+            )
         assert load.await_count == 1
         release.set()
-        await asyncio.wait_for(asyncio.gather(first, second), timeout=5)
+        await asyncio.wait_for(first, timeout=5)
     finally:
         release.set()
-        for task in (first, second):
-            if task is not None and not task.done():
-                task.cancel()
-        await asyncio.gather(
-            *(task for task in (first, second) if task is not None),
-            return_exceptions=True,
-        )
+        if not first.done():
+            first.cancel()
+        await asyncio.gather(first, return_exceptions=True)
+    await assert_document_state(factory, document_id, DocumentStatus.COMPLETED, 1)
+
+    # The re-queued duplicate later finds the finished document and does nothing.
+    await ingest_document(document_id, session_factory=factory)
     await assert_document_state(factory, document_id, DocumentStatus.COMPLETED, 1)
     assert load.await_count == 1
+
+
+async def test_duplicate_takes_over_when_active_attempt_fails(
+    committed_document, fake_pipeline
+):
+    factory, document_id = committed_document
+    _, graph = fake_pipeline
+    graph.side_effect = ConnectionError("graph service unavailable")
+    with pytest.raises(ConnectionError):
+        await ingest_document(document_id, session_factory=factory)
+    # The lock is gone with the failed attempt, so the re-queued copy can finish.
+    graph.side_effect = None
+    await ingest_document(document_id, session_factory=factory)
+    await assert_document_state(factory, document_id, DocumentStatus.COMPLETED, 1)
 
 
 async def count_checkpoints(factory, document_id):

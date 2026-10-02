@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from ..ai.document_ingestion import (
+    DocumentBusyError,
     InvalidDocumentError,
     _mark_document_failed,
     ingest_document,
@@ -18,6 +19,8 @@ from ..core.messaging import INGESTION_TASK_NAME
 from .async_runner import get_worker_runner
 
 logger = logging.getLogger(__name__)
+# How long a duplicate delivery waits before checking a locked document again.
+BUSY_REDELIVERY_DELAY_SECONDS = 60
 
 
 def _is_permanent(exc: BaseException) -> bool:
@@ -33,6 +36,9 @@ async def _run_attempt(document_id: int, *, final_attempt: bool) -> None:
     try:
         try:
             await ingest_document(document_id, session_factory=session_factory)
+        except DocumentBusyError:
+            # Not a failure of this document: the active attempt decides its status.
+            raise
         except Exception as exc:
             if final_attempt or _is_permanent(exc):
                 await _mark_document_failed(
@@ -41,6 +47,17 @@ async def _run_attempt(document_id: int, *, final_attempt: bool) -> None:
             raise
     finally:
         await engine.dispose()
+
+
+def _redeliver_later(task, delay_seconds: int) -> None:
+    """
+    Publish this delivery again without spending a retry. It must not be dropped:
+    the attempt holding the lock may still fail without another message to follow
+    (e.g. its connection died), and then this copy has to take over.
+    """
+    task.signature_from_request(
+        task.request, countdown=delay_seconds, retries=task.request.retries
+    ).apply_async()
 
 
 @celery_app.task(
@@ -59,6 +76,15 @@ def ingest_document_task(self, document_id: int) -> None:
     final_attempt = self.request.retries >= self.max_retries
     try:
         get_worker_runner().run(_run_attempt(document_id, final_attempt=final_attempt))
+    except DocumentBusyError:
+        logger.info(
+            "Document %d is being processed by another attempt; checking again in %d s",
+            document_id,
+            BUSY_REDELIVERY_DELAY_SECONDS,
+        )
+        _redeliver_later(self, BUSY_REDELIVERY_DELAY_SECONDS)
+        # Returning acknowledges this message; the copy just published replaces it.
+        return
     except Exception as exc:
         if _is_permanent(exc):
             logger.exception(

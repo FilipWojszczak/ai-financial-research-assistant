@@ -8,6 +8,7 @@ from langchain_core.documents import Document as LangchainDocument
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf.errors import PdfReadError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..core.document_storage import document_file_path
@@ -24,12 +25,17 @@ embeddings_model = GoogleGenerativeAIEmbeddings(
 )
 
 
-# SQLAlchemy renders key_share=True as SELECT ... FOR NO KEY UPDATE on PostgreSQL.
-INGESTION_LOCK = {"key_share": True}
+# SQLAlchemy renders this as SELECT ... FOR NO KEY UPDATE NOWAIT on PostgreSQL.
+INGESTION_LOCK = {"key_share": True, "nowait": True}
+_LOCK_NOT_AVAILABLE = "55P03"
 
 
 class InvalidDocumentError(ValueError):
     """The source PDF cannot be ingested by retrying the same input."""
+
+
+class DocumentBusyError(RuntimeError):
+    """Another attempt holds the document's lock; this delivery is a duplicate."""
 
 
 async def load_pdf_documents(file_path: Path) -> list[LangchainDocument]:
@@ -139,13 +145,21 @@ async def ingest_document(
     """Run one transactional attempt; propagate failures to the caller."""
     async with session_factory() as session:
         try:
-            # Hold the row lock through the commit. Duplicate deliveries wait, then
-            # see the first attempt's result. A crash releases the lock on disconnect.
+            # Hold the row lock through the commit. A crash releases it on disconnect.
             # NO KEY UPDATE (not UPDATE) still excludes competing attempts, but lets
             # checkpoint rows referencing this document commit in their own sessions.
-            document = await session.get(
-                Document, document_id, with_for_update=INGESTION_LOCK
-            )
+            # NOWAIT: a duplicate delivery must not occupy a worker process for the
+            # whole length of the active attempt; the task re-queues it instead.
+            try:
+                document = await session.get(
+                    Document, document_id, with_for_update=INGESTION_LOCK
+                )
+            except DBAPIError as exc:
+                if getattr(exc.orig, "sqlstate", None) == _LOCK_NOT_AVAILABLE:
+                    raise DocumentBusyError(
+                        f"Document {document_id} is locked by another attempt"
+                    ) from exc
+                raise
             if document is None or document.status != DocumentStatus.PROCESSING:
                 return
 

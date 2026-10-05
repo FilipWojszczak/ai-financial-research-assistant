@@ -272,11 +272,10 @@ async def test_complete_pdf_ingestion(flow):
 async def test_ai_timeout_exhausts_retries_and_finishes_failed(flow):
     document_id = await flow.upload(failure=True)
     await flow.wait_status(document_id, "failed")
+    # Each task attempt sends the stalled call AI_REQUEST_ATTEMPTS (3) times before
+    # the timeout fails the attempt; Celery then retries the task three times.
     assert (flow.directory / "attempts").read_text().splitlines() == [
-        "0",
-        "1",
-        "2",
-        "3",
+        str(task_retry) for task_retry in range(4) for _ in range(3)
     ]
     assert (flow.storage / f"{document_id}.pdf").exists()
     async with flow.factory() as session:

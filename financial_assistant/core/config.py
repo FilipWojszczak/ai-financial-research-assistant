@@ -35,7 +35,14 @@ class Settings(BaseSettings):
     ingestion_consumer_timeout_seconds: int = Field(default=3 * 60 * 60, gt=0)
 
     document_storage_path: Path = Path("data/documents")
-    ai_request_timeout_seconds: float = Field(default=120, gt=0, allow_inf_nan=False)
+    # Per-call deadlines. Normal calls take <20 s (LLM) and <5 s (embedding batch);
+    # a call silent past its deadline is treated as stalled and sent again.
+    ai_request_timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
+    embedding_request_timeout_seconds: float = Field(
+        default=30, gt=0, allow_inf_nan=False
+    )
+    # Tries per call before the timeout fails the whole ingestion attempt.
+    ai_request_attempts: int = Field(default=3, ge=1, le=10)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

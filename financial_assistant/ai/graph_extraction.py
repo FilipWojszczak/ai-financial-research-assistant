@@ -1,4 +1,5 @@
 import logging
+from functools import partial
 from typing import Literal
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -87,9 +88,8 @@ def _normalize_entity_type(type_str: str) -> EntityType:
 
 async def extract_entities_and_relationships(chunk_text: str) -> ExtractionResult:
     """Call the LLM to extract entities and relationships from a text chunk."""
-    result = await ai_request(
-        _structured_extractor.ainvoke(_EXTRACTION_PROMPT.format(text=chunk_text))
-    )
+    prompt = _EXTRACTION_PROMPT.format(text=chunk_text)
+    result = await ai_request(partial(_structured_extractor.ainvoke, prompt))
     return result  # type: ignore[return-value]
 
 

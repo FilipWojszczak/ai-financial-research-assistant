@@ -1,5 +1,6 @@
 import logging
 import re
+from functools import partial
 
 import networkx as nx
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -74,7 +75,7 @@ async def _generate_community_summary(
         if cached is not None:
             return cached["title"], cached["summary"]
 
-    response = await ai_request(_summary_llm.ainvoke(prompt))
+    response = await ai_request(partial(_summary_llm.ainvoke, prompt))
     title, summary = _parse_summary_response(response.text)
     if not summary:
         # The summary is embedded next, and the embedding API rejects empty input.

@@ -116,6 +116,7 @@ async def flow(private_database, tmp_path, monkeypatch):
             "DOCUMENT_STORAGE_PATH": str(storage),
             "GOOGLE_API_KEY": "mock-google-api-key-for-testing",
             "AI_REQUEST_TIMEOUT_SECONDS": "0.1",
+            "AI_REQUEST_ATTEMPTS": "3",
             "INGESTION_TEST_DIRECTORY": str(tmp_path),
         }
 

@@ -32,8 +32,12 @@ class ExtractedEntity(BaseModel):
 
 
 class ExtractedRelationship(BaseModel):
-    source: str = Field(description="Name of the source entity")
-    target: str = Field(description="Name of the target entity")
+    source: str = Field(
+        description="Name of the source entity, exactly as given in `entities`"
+    )
+    target: str = Field(
+        description="Name of the target entity, exactly as given in `entities`"
+    )
     relationship_type: str = Field(
         description=(
             "Concise relationship type (e.g. CEO_OF, ACQUIRED, REPORTED, COMPETES_WITH)"
@@ -72,18 +76,6 @@ Only extract entities and relationships that are explicitly mentioned. Do not in
 Text:
 {text}
 """  # noqa: E501
-
-
-def _normalize_entity_type(type_str: str) -> EntityType:
-    _map = {
-        "COMPANY": EntityType.COMPANY,
-        "PERSON": EntityType.PERSON,
-        "FINANCIAL_METRIC": EntityType.FINANCIAL_METRIC,
-        "EVENT": EntityType.EVENT,
-        "PRODUCT": EntityType.PRODUCT,
-        "LOCATION": EntityType.LOCATION,
-    }
-    return _map.get(type_str.upper(), EntityType.OTHER)
 
 
 async def extract_entities_and_relationships(chunk_text: str) -> ExtractionResult:
@@ -143,7 +135,7 @@ async def process_document_graph(
             if key not in entity_map:
                 entity = Entity(
                     name=extracted.name,
-                    type=_normalize_entity_type(extracted.type),
+                    type=EntityType[extracted.type],
                     description=extracted.description,
                     document_id=document_id,
                 )

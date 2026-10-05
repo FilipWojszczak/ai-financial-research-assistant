@@ -4,12 +4,12 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from financial_assistant.ai.checkpoints import AttemptCheckpoints
+from financial_assistant.ai.community_detection import CommunitySummary
 from financial_assistant.ai.document_ingestion import (
     DocumentBusyError,
     _mark_document_failed,
@@ -239,7 +239,7 @@ def graph_pipeline_with_fake_models():
     )
     summary_llm = MagicMock()
     summary_llm.ainvoke = AsyncMock(
-        return_value=AIMessage(content="TITLE: Apple leadership\nSUMMARY: Tim Cook.")
+        return_value=CommunitySummary(title="Apple leadership", summary="Tim Cook.")
     )
     summary_embeddings = MagicMock()
     summary_embeddings.aembed_documents = AsyncMock(return_value=[[0.2] * 768])
@@ -256,7 +256,10 @@ def graph_pipeline_with_fake_models():
             "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
             new=AsyncMock(return_value=extraction),
         ) as extract,
-        patch("financial_assistant.ai.community_detection._summary_llm", summary_llm),
+        patch(
+            "financial_assistant.ai.community_detection._structured_summarizer",
+            summary_llm,
+        ),
         patch(
             "financial_assistant.ai.community_detection._embeddings_model",
             summary_embeddings,

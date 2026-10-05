@@ -8,13 +8,13 @@ from typing import cast
 
 from celery import Task, current_task
 from celery.signals import worker_ready
-from langchain_core.messages import AIMessage
 
 from financial_assistant.ai import (
     community_detection,
     document_ingestion,
     graph_extraction,
 )
+from financial_assistant.ai.community_detection import CommunitySummary
 from financial_assistant.ai.graph_extraction import (
     ExtractedEntity,
     ExtractedRelationship,
@@ -51,12 +51,12 @@ async def extract(prompt):
 
 
 async def summarize(prompt):
-    return AIMessage(content="TITLE: Acme leadership\nSUMMARY: Alice leads Acme.")
+    return CommunitySummary(title="Acme leadership", summary="Alice leads Acme.")
 
 
 document_ingestion.embeddings_model = SimpleNamespace(aembed_documents=embed)
 graph_extraction._structured_extractor = SimpleNamespace(ainvoke=extract)
-community_detection._summary_llm = SimpleNamespace(ainvoke=summarize)
+community_detection._structured_summarizer = SimpleNamespace(ainvoke=summarize)
 community_detection._embeddings_model = SimpleNamespace(aembed_documents=embed)
 
 # Keep real broker retries while shortening the backoff for test runtime.

@@ -1,9 +1,10 @@
 import logging
-import re
 from functools import partial
 
 import networkx as nx
+from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,18 @@ _embeddings_model = GoogleGenerativeAIEmbeddings(
     model="models/gemini-embedding-001", output_dimensionality=768
 )
 
+
+class CommunitySummary(BaseModel):
+    title: str = Field(description="Concise title of 5-10 words")
+    summary: str = Field(
+        description=(
+            "2-3 sentences on what connects these entities and why they matter"
+        )
+    )
+
+
+_structured_summarizer = _summary_llm.with_structured_output(CommunitySummary)
+
 _SUMMARY_PROMPT = """
 You are analysing a cluster of related entities from a financial document.
 
@@ -37,10 +50,6 @@ Key relationships:
 {relationships}
 
 Write a concise title (5-10 words) and a 2-3 sentence summary that captures what connects these entities and why they matter.
-
-Format:
-TITLE: <title>
-SUMMARY: <summary>
 """  # noqa: E501
 
 
@@ -75,54 +84,29 @@ async def _generate_community_summary(
         if cached is not None:
             return cached["title"], cached["summary"]
 
-    response = await ai_request(partial(_summary_llm.ainvoke, prompt))
-    title, summary = _parse_summary_response(response.text)
+    try:
+        response: CommunitySummary = await ai_request(  # type: ignore[assignment]
+            partial(_structured_summarizer.ainvoke, prompt)
+        )
+        title, summary = response.title.strip(), response.summary.strip()
+    except OutputParserException:
+        # Empty or truncated output (e.g. a safety block). At temperature 0 the same
+        # prompt fails again, so a task retry would only dead-letter the document.
+        logger.warning("Community summary response was not parseable", exc_info=True)
+        title, summary = "", ""
+    title = title or "Community"
     if not summary:
         # The summary is embedded next, and the embedding API rejects empty input.
-        # A retry would repeat the whole document, so fall back deterministically.
+        # The schema cannot forbid blank strings, so fall back deterministically.
         logger.warning(
             "Community summary response had no usable summary; using entity fallback"
         )
         summary = _fallback_summary(entities, ordered_relationships)
-    title = title or "Community"
 
     if checkpoints is not None:
         await checkpoints.put(
             CheckpointKind.COMMUNITY_SUMMARY, key, {"title": title, "summary": summary}
         )
-    return title, summary
-
-
-_LABEL = re.compile(r"^[\s#>*_`-]*(TITLE|SUMMARY)[\s*_`]*:[\s*_`]*(.*)$", re.IGNORECASE)
-
-
-def _parse_summary_response(content: str) -> tuple[str, str]:
-    """
-    Extract TITLE/SUMMARY from the model's text. Tolerates markdown decoration
-    (``**SUMMARY:**``), lowercase labels and a summary that starts on the next line.
-    Text without any labels is treated as the summary.
-    """
-    title = ""
-    summary_lines: list[str] = []
-    unlabelled: list[str] = []
-    section = None
-    for raw_line in content.strip().splitlines():
-        line = raw_line.strip()
-        match = _LABEL.match(line)
-        if match:
-            section = match[1].upper()
-            value = match[2].strip()
-            if section == "TITLE":
-                title = value
-            elif value:
-                summary_lines.append(value)
-        elif not line:
-            continue
-        elif section == "SUMMARY":
-            summary_lines.append(line)
-        elif section is None:
-            unlabelled.append(line)
-    summary = " ".join(summary_lines) or (" ".join(unlabelled) if not title else "")
     return title, summary
 
 

@@ -7,35 +7,10 @@ from financial_assistant.ai.graph_extraction import (
     ExtractedEntity,
     ExtractedRelationship,
     ExtractionResult,
-    _normalize_entity_type,
     process_document_graph,
 )
 from financial_assistant.models.document import ParentChunk
-from financial_assistant.models.graph import Entity, EntityRelationship, EntityType
-
-# ---------------------------------------------------------------------------
-# _normalize_entity_type - pure unit tests, no I/O
-# ---------------------------------------------------------------------------
-
-
-def test_normalize_entity_type_known_types():
-    assert _normalize_entity_type("COMPANY") == EntityType.COMPANY
-    assert _normalize_entity_type("PERSON") == EntityType.PERSON
-    assert _normalize_entity_type("FINANCIAL_METRIC") == EntityType.FINANCIAL_METRIC
-    assert _normalize_entity_type("EVENT") == EntityType.EVENT
-    assert _normalize_entity_type("PRODUCT") == EntityType.PRODUCT
-    assert _normalize_entity_type("LOCATION") == EntityType.LOCATION
-
-
-def test_normalize_entity_type_other_for_unknown():
-    assert _normalize_entity_type("FOOBAR") == EntityType.OTHER
-    assert _normalize_entity_type("") == EntityType.OTHER
-
-
-def test_normalize_entity_type_case_insensitive():
-    assert _normalize_entity_type("company") == EntityType.COMPANY
-    assert _normalize_entity_type("Person") == EntityType.PERSON
-
+from financial_assistant.models.graph import Entity, EntityRelationship
 
 # ---------------------------------------------------------------------------
 # process_document_graph - mocked LLM and session

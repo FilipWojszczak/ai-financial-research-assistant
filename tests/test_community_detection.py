@@ -1,10 +1,11 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.exceptions import OutputParserException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from financial_assistant.ai.community_detection import (
+    CommunitySummary,
     _generate_community_summary,
     process_document_communities,
 )
@@ -62,17 +63,18 @@ def _make_session(relationships: list) -> tuple[AsyncMock, list]:
 
 
 # ---------------------------------------------------------------------------
-# _generate_community_summary - LLM response parsing
+# _generate_community_summary - structured LLM response handling
 # ---------------------------------------------------------------------------
 
 
-async def test_generate_community_summary_parses_title_and_summary():
-    """Correctly structured LLM response is split into title and summary."""
-    mock_response = AIMessage(
-        content="TITLE: Apple Leadership\nSUMMARY: Tim Cook leads Apple as CEO."
+async def test_generate_community_summary_returns_title_and_summary():
+    mock_response = CommunitySummary(
+        title="Apple Leadership", summary="Tim Cook leads Apple as CEO."
     )
 
-    with patch("financial_assistant.ai.community_detection._summary_llm") as mock_llm:
+    with patch(
+        "financial_assistant.ai.community_detection._structured_summarizer"
+    ) as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=mock_response)
         title, summary = await _generate_community_summary(
             [_make_entity(1, "Apple"), _make_entity(2, "Tim Cook")], []
@@ -82,62 +84,40 @@ async def test_generate_community_summary_parses_title_and_summary():
     assert summary == "Tim Cook leads Apple as CEO."
 
 
-async def test_generate_community_summary_falls_back_when_format_not_followed():
-    """When the LLM ignores the TITLE:/SUMMARY: format, safe defaults are returned."""
-    mock_response = AIMessage(content="Some unstructured response")
-
-    with patch("financial_assistant.ai.community_detection._summary_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        title, summary = await _generate_community_summary([_make_entity(1)], [])
-
-    assert title == "Community"
-    assert summary == "Some unstructured response"
-
-
 @pytest.mark.parametrize(
-    ("content", "expected_title", "expected_summary"),
-    [
-        (
-            "TITLE: Cloud Growth\nSUMMARY:\nGoogle Cloud grew.\nTPUs scaled.",
-            "Cloud Growth",
-            "Google Cloud grew. TPUs scaled.",
-        ),
-        (
-            "**TITLE:** Cloud Growth\n**SUMMARY:** Google Cloud grew.",
-            "Cloud Growth",
-            "Google Cloud grew.",
-        ),
-        (
-            "## Title: Cloud Growth\nsummary: Google Cloud grew.",
-            "Cloud Growth",
-            "Google Cloud grew.",
-        ),
-    ],
+    ("response_title", "response_summary"),
+    [("Cloud Growth", ""), ("Cloud Growth", "   "), ("", "")],
 )
-async def test_generate_community_summary_tolerates_format_variants(
-    content, expected_title, expected_summary
+async def test_generate_community_summary_never_returns_empty_fields(
+    response_title, response_summary
 ):
-    with patch("financial_assistant.ai.community_detection._summary_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=content))
-        title, summary = await _generate_community_summary([_make_entity(1)], [])
-
-    assert (title, summary) == (expected_title, expected_summary)
-
-
-@pytest.mark.parametrize(
-    "content",
-    ["", "   ", "TITLE: Cloud Growth", "TITLE: Cloud Growth\nSUMMARY:"],
-)
-async def test_generate_community_summary_never_returns_empty_summary(content):
     """An empty summary would make the embedding call fail with HTTP 400."""
     entities = [_make_entity(1, "Alphabet"), _make_entity(2, "Google Cloud")]
     relationships = [_make_relationship(1, 2, "OWNS")]
+    response = CommunitySummary(title=response_title, summary=response_summary)
 
-    with patch("financial_assistant.ai.community_detection._summary_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=content))
+    with patch(
+        "financial_assistant.ai.community_detection._structured_summarizer"
+    ) as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
         title, summary = await _generate_community_summary(entities, relationships)
 
     assert title
+    assert summary == "Related entities: Alphabet, Google Cloud. Relationships: OWNS."
+
+
+async def test_generate_community_summary_falls_back_when_output_unparseable():
+    """A blocked or truncated response must not fail the whole document."""
+    entities = [_make_entity(1, "Alphabet"), _make_entity(2, "Google Cloud")]
+    relationships = [_make_relationship(1, 2, "OWNS")]
+
+    with patch(
+        "financial_assistant.ai.community_detection._structured_summarizer"
+    ) as mock_llm:
+        mock_llm.ainvoke = AsyncMock(side_effect=OutputParserException("empty"))
+        title, summary = await _generate_community_summary(entities, relationships)
+
+    assert title == "Community"
     assert summary == "Related entities: Alphabet, Google Cloud. Relationships: OWNS."
 
 

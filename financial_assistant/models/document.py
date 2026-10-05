@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 
 if TYPE_CHECKING:
+    from .graph import Entity, GraphCommunity
     from .user import User
 
 
@@ -61,6 +62,7 @@ class Document(Base):
         ),
         nullable=False,
         default=DocumentStatus.PROCESSING,
+        server_default=DocumentStatus.PROCESSING.value,
     )
 
     # when owner_id is None, it means the document is public and can be accessed by any
@@ -69,6 +71,16 @@ class Document(Base):
 
     owner: Mapped[User | None] = relationship(back_populates="documents")
     parent_chunks: Mapped[list[ParentChunk]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    entities: Mapped[list[Entity]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    communities: Mapped[list[GraphCommunity]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
         passive_deletes=True,

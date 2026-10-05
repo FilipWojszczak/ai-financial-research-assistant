@@ -35,12 +35,22 @@ IGNORE_TABLES = {
     "checkpoint_writes",
     "checkpoint_migrations",
     "checkpoint_blobs",
+    # Created by Postgres extensions (PostGIS, pgvector/ParadeDB), not by our models
+    "spatial_ref_sys",
+    "_typmod_cache",
+}
+
+# Indexes created with raw SQL in migrations that can't be expressed on the models
+IGNORE_INDEXES = {
+    "child_chunk_bm25_idx",
 }
 
 
 def include_name(name, type_, parent_names):
     if type_ == "table":
         return name not in IGNORE_TABLES
+    if type_ == "index":
+        return name not in IGNORE_INDEXES
     return True
 
 

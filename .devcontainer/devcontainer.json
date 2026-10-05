@@ -33,7 +33,7 @@
   "customizations": {
     "vscode": {
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
 
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {

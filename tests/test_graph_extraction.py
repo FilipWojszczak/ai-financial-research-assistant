@@ -1,0 +1,194 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from financial_assistant.ai.graph_extraction import (
+    ExtractedEntity,
+    ExtractedRelationship,
+    ExtractionResult,
+    process_document_graph,
+)
+from financial_assistant.models.document import ParentChunk
+from financial_assistant.models.graph import Entity, EntityRelationship
+
+# ---------------------------------------------------------------------------
+# process_document_graph - mocked LLM and session
+# ---------------------------------------------------------------------------
+
+
+def _make_chunk(chunk_id: int, content: str = "Some text") -> ParentChunk:
+    chunk = MagicMock(spec=ParentChunk)
+    chunk.id = chunk_id
+    chunk.content = content
+    return chunk
+
+
+def _make_extraction_result(
+    entities: list[tuple[str, str]],
+    relationships: list[tuple[str, str, str]],
+) -> ExtractionResult:
+    return ExtractionResult(
+        entities=[
+            ExtractedEntity(name=name, type=etype, description=None)
+            for name, etype in entities
+        ],
+        relationships=[
+            ExtractedRelationship(
+                source=src, target=tgt, relationship_type=rel_type, description=None
+            )
+            for src, tgt, rel_type in relationships
+        ],
+    )
+
+
+async def test_process_document_graph_deduplicates_entities():
+    """The same entity name across two chunks should produce only one Entity row."""
+    chunk_a = _make_chunk(1, "Apple Inc. reported revenue.")
+    chunk_b = _make_chunk(2, "Apple Inc. is headquartered in Cupertino.")
+
+    extraction_a = _make_extraction_result(
+        [("Apple Inc.", "COMPANY"), ("Tim Cook", "PERSON")],
+        [("Tim Cook", "Apple Inc.", "CEO_OF")],
+    )
+    extraction_b = _make_extraction_result(
+        [("Apple Inc.", "COMPANY"), ("Cupertino", "LOCATION")],
+        [("Apple Inc.", "Cupertino", "OPERATES_IN")],
+    )
+
+    session = AsyncMock(spec=AsyncSession)
+    added_objects: list = []
+    session.add = lambda obj: added_objects.append(obj)
+
+    async def assign_entity_ids():
+        # SQLAlchemy assigns primary keys on flush. Without this behavior, every mocked
+        # entity ID is None and valid relationships look like self-relationships.
+        entities = [obj for obj in added_objects if isinstance(obj, Entity)]
+        for entity_id, entity in enumerate(entities, start=1):
+            entity.id = entity_id
+
+    session.flush = AsyncMock(side_effect=assign_entity_ids)
+
+    with patch(
+        "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
+        new=AsyncMock(side_effect=[extraction_a, extraction_b]),
+    ):
+        entities = await process_document_graph(
+            session=session,
+            document_id=1,
+            parent_chunks=[chunk_a, chunk_b],
+        )
+
+    entity_names = {e.name for e in entities}
+    # "Apple Inc." appears in both chunks but should be stored once
+    assert entity_names == {"Apple Inc.", "Tim Cook", "Cupertino"}
+    assert len(entities) == 3
+
+    entity_ids = {entity.name: entity.id for entity in entities}
+    relationships = [
+        obj for obj in added_objects if isinstance(obj, EntityRelationship)
+    ]
+    assert {
+        (relationship.source_entity_id, relationship.target_entity_id)
+        for relationship in relationships
+    } == {
+        (entity_ids["Tim Cook"], entity_ids["Apple Inc."]),
+        (entity_ids["Apple Inc."], entity_ids["Cupertino"]),
+    }
+
+
+async def test_process_document_graph_skips_self_relationships():
+    """Relationships where source == target should be silently dropped."""
+    chunk = _make_chunk(1)
+    extraction = _make_extraction_result(
+        [("Apple Inc.", "COMPANY")],
+        [("Apple Inc.", "Apple Inc.", "SELF_REF")],
+    )
+
+    session = AsyncMock(spec=AsyncSession)
+    session.flush = AsyncMock()
+    added_objects: list = []
+    session.add = lambda obj: added_objects.append(obj)
+
+    with patch(
+        "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
+        new=AsyncMock(return_value=extraction),
+    ):
+        entities = await process_document_graph(
+            session=session,
+            document_id=1,
+            parent_chunks=[chunk],
+        )
+
+    relationship_objects = [
+        o for o in added_objects if isinstance(o, EntityRelationship)
+    ]
+    assert relationship_objects == []
+    assert len(entities) == 1
+
+
+async def test_process_document_graph_skips_unknown_relationship_entities():
+    """Relationships referencing entities not in the extraction should be dropped."""
+    chunk = _make_chunk(1)
+    extraction = _make_extraction_result(
+        [("Apple Inc.", "COMPANY")],
+        [("Apple Inc.", "Unknown Corp", "PARTNER_OF")],
+    )
+
+    session = AsyncMock(spec=AsyncSession)
+    session.flush = AsyncMock()
+    added_objects: list = []
+    session.add = lambda obj: added_objects.append(obj)
+
+    with patch(
+        "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
+        new=AsyncMock(return_value=extraction),
+    ):
+        await process_document_graph(
+            session=session,
+            document_id=1,
+            parent_chunks=[chunk],
+        )
+
+    relationship_objects = [
+        o for o in added_objects if isinstance(o, EntityRelationship)
+    ]
+    assert relationship_objects == []
+
+
+async def test_graph_failure_propagates_without_skipping_a_chunk():
+    session = AsyncMock(spec=AsyncSession)
+    extraction = _make_extraction_result([("Microsoft", "COMPANY")], [])
+    with (
+        patch(
+            "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
+            new=AsyncMock(side_effect=[RuntimeError("LLM error"), extraction]),
+        ) as extract,
+        pytest.raises(RuntimeError, match="LLM error"),
+    ):
+        await process_document_graph(session, 1, [_make_chunk(1), _make_chunk(2)])
+    assert extract.await_count == 1
+    session.flush.assert_not_awaited()
+
+
+async def test_process_document_graph_rejects_empty_parent_chunks():
+    """Graph extraction requires at least one parent chunk."""
+    session = AsyncMock(spec=AsyncSession)
+
+    with pytest.raises(ValueError, match="without parent chunks"):
+        await process_document_graph(session, document_id=1, parent_chunks=[])
+
+    session.flush.assert_not_awaited()
+
+
+async def test_graph_timeout_propagates_for_retry():
+    session = AsyncMock(spec=AsyncSession)
+    with (
+        patch(
+            "financial_assistant.ai.graph_extraction.extract_entities_and_relationships",
+            new=AsyncMock(side_effect=TimeoutError("provider timed out")),
+        ),
+        pytest.raises(TimeoutError),
+    ):
+        await process_document_graph(session, 1, [_make_chunk(1)])
+    session.flush.assert_not_awaited()

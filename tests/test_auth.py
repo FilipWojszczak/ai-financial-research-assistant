@@ -132,6 +132,12 @@ async def test_update_password_success(
     assert login_response.status_code == 200
     assert "access_token" in login_response.json()
 
+    old_password_response = await client.post(
+        "/auth/token",
+        data={"username": "update_pass@example.com", "password": current_password},
+    )
+    assert old_password_response.status_code == 401
+
 
 async def test_update_password_incorrect_current_password(
     client: AsyncClient, user_factory: UserFactory, token_factory: TokenFactory
@@ -154,6 +160,12 @@ async def test_update_password_incorrect_current_password(
     assert response.status_code == 401
     assert response.json()["detail"] == "Current password is incorrect"
 
+    unchanged_login = await client.post(
+        "/auth/token",
+        data={"username": "wrong_pass@example.com", "password": current_password},
+    )
+    assert unchanged_login.status_code == 200
+
 
 async def test_update_password_same_as_current(
     client: AsyncClient, user_factory: UserFactory, token_factory: TokenFactory
@@ -175,6 +187,12 @@ async def test_update_password_same_as_current(
         response.json()["detail"]
         == "Current password and new password cannot be the same"
     )
+
+    unchanged_login = await client.post(
+        "/auth/token",
+        data={"username": "same_pass@example.com", "password": current_password},
+    )
+    assert unchanged_login.status_code == 200
 
 
 async def test_delete_account_success(
@@ -221,3 +239,9 @@ async def test_delete_account_incorrect_password(
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Incorrect password"
+
+    unchanged_login = await client.post(
+        "/auth/token",
+        data={"username": "keep_me@example.com", "password": password},
+    )
+    assert unchanged_login.status_code == 200

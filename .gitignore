@@ -19,3 +19,6 @@ __pycache__/
 
 # Database
 postgres_data/
+
+# Locally persisted source documents
+data/

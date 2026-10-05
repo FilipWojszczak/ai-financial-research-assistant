@@ -1,0 +1,102 @@
+"""Celery entry point for source PDFs already stored by the API."""
+
+import logging
+
+from celery.exceptions import Reject
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from ..ai.document_ingestion import (
+    DocumentBusyError,
+    InvalidDocumentError,
+    _mark_document_failed,
+    ingest_document,
+)
+from ..ai.requests import is_permanent_provider_error
+from ..core.celery_app import celery_app
+from ..core.config import get_settings
+from ..core.messaging import INGESTION_TASK_NAME
+from .async_runner import get_worker_runner
+
+logger = logging.getLogger(__name__)
+# How long a duplicate delivery waits before checking a locked document again.
+BUSY_REDELIVERY_DELAY_SECONDS = 60
+
+
+def _is_permanent(exc: BaseException) -> bool:
+    """Failures that the same input reproduces, so retries only waste model calls."""
+    return isinstance(exc, InvalidDocumentError) or is_permanent_provider_error(exc)
+
+
+async def _run_attempt(document_id: int, *, final_attempt: bool) -> None:
+    # Own the database resources for this attempt. Never reuse the API's pool
+    # or any connections inherited from a prefork parent.
+    engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        try:
+            await ingest_document(document_id, session_factory=session_factory)
+        except DocumentBusyError:
+            # Not a failure of this document: the active attempt decides its status.
+            raise
+        except Exception as exc:
+            if final_attempt or _is_permanent(exc):
+                await _mark_document_failed(
+                    document_id, session_factory=session_factory
+                )
+            raise
+    finally:
+        await engine.dispose()
+
+
+def _redeliver_later(task, delay_seconds: int) -> None:
+    """
+    Publish this delivery again without spending a retry. It must not be dropped:
+    the attempt holding the lock may still fail without another message to follow
+    (e.g. its connection died), and then this copy has to take over.
+    """
+    task.signature_from_request(
+        task.request, countdown=delay_seconds, retries=task.request.retries
+    ).apply_async()
+
+
+@celery_app.task(
+    bind=True,
+    name=INGESTION_TASK_NAME,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    acks_on_failure_or_timeout=True,
+    max_retries=3,
+)
+def ingest_document_task(self, document_id: int) -> None:
+    """Process an ID with up to three retries (four attempts in total)."""
+    if type(document_id) is not int or document_id <= 0:
+        raise Reject("document_id must be a positive integer", requeue=False)
+
+    final_attempt = self.request.retries >= self.max_retries
+    try:
+        get_worker_runner().run(_run_attempt(document_id, final_attempt=final_attempt))
+    except DocumentBusyError:
+        logger.info(
+            "Document %d is being processed by another attempt; checking again in %d s",
+            document_id,
+            BUSY_REDELIVERY_DELAY_SECONDS,
+        )
+        _redeliver_later(self, BUSY_REDELIVERY_DELAY_SECONDS)
+        # Returning acknowledges this message; the copy just published replaces it.
+        return
+    except Exception as exc:
+        if _is_permanent(exc):
+            logger.exception(
+                "Document %d cannot succeed on retry; rejecting to dead-letter queue",
+                document_id,
+            )
+            raise Reject(str(exc), requeue=False) from exc
+        if final_attempt:
+            logger.exception(
+                "Document %d exhausted retries; rejecting to DLQ", document_id
+            )
+            raise Reject(str(exc), requeue=False) from exc
+        # Retryable failures remain PROCESSING while Celery schedules a new message.
+        # request.retries starts at zero: delays are 10, 20 and 40 seconds.
+        raise self.retry(exc=exc, countdown=10 * (2**self.request.retries)) from exc

@@ -6,11 +6,12 @@ If something fails, it blocks the end of the turn once and sends the errors to C
 to fix. If it still fails on the retry, it lets Claude stop and shows you a warning,
 so it never loops.
 
-The files come from a per-session marker file that format_python.py appends to after
-each Edit/Write; with no marker, the gate is skipped. Not checked here: files changed
-only via Bash or by you, gitignored files, and errors that an edit causes in other,
-unedited files (pyright reports only on the files it is given). /ready and CI cover
-those.
+The files come from a per-session marker file that the global
+~/.claude/hooks/format_python.py appends to after each Edit/Write (only in projects
+that have this gate); with no marker, the gate is skipped. Not checked here: files
+changed only via Bash or by you, gitignored files, and errors that an edit causes in
+other, unedited files (pyright reports only on the files it is given). /ready and CI
+cover those.
 
 Controlled by the CLAUDE_STOP_GATE env var (set in .claude/settings.json -> "env"):
   "ruff,pyright" (default) | "ruff" | "off"
@@ -41,7 +42,7 @@ def notify(message: str) -> NoReturn:
 
 
 def stop_gate_marker(session_id: str) -> str:
-    # Keep in sync with format_python.py.
+    # Keep in sync with ~/.claude/hooks/format_python.py.
     safe_id = re.sub(r"[^\w-]", "", session_id) or "unknown"
     return os.path.join(tempfile.gettempdir(), f"claude-stop-gate-{safe_id}")
 
@@ -53,7 +54,8 @@ def sh(args: list[str], cwd: str, timeout: float = 150) -> subprocess.CompletedP
 
 
 def edited_python_files(marker: str, cwd: str) -> list[str]:
-    """Paths recorded by format_python.py that still exist and are not gitignored."""
+    """Paths recorded by format_python.py (global hook) that still exist and are not
+    gitignored."""
     try:
         with open(marker) as f:
             paths = {line.strip() for line in f if line.strip()}

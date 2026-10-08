@@ -37,15 +37,7 @@ Notatki dla Filipa (komentarze HTML są usuwane, zanim plik trafi do Claude, wi�
 - Not implemented yet: hybrid retrieval, the LangGraph agent and its API. `child_chunk` has a BM25 index (migration `95900fffcf36`); `init_langgraph_pool` in `core/db.py` is the only LangGraph piece so far.
 
 ## Rules
-- Tests marked `llm` call paid LLM/embedding APIs. Never run them unless I explicitly ask.
-- Never run destructive database operations (DROP, TRUNCATE, DELETE without WHERE, removing Docker volumes) without asking me first.
 - The embedding dimension must match the pgvector column. Changing the embedding model or the chunking strategy requires a migration and re-embedding: flag it and ask, never do it silently.
-- LangChain/LangGraph APIs change often. When unsure about an API, check the installed version and the current docs instead of guessing from memory.
-
-## Workflow
-- Work on feature branches (`feat/…`, `fix/…`, `chore/…`); never commit to `main`. Commit messages: Conventional Commits, in English.
-- For changes touching more than 2–3 files, propose a plan before editing.
-- Before saying a task is done, run ruff, pyright and the fast tests, and show the commands with their results.
 
 ## Compact instructions
 When compacting, keep: the current branch, the list of modified files, the verification commands used, and any failing tests with their error messages.

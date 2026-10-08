@@ -22,3 +22,7 @@ postgres_data/
 
 # Locally persisted source documents
 data/
+
+# Claude Code: personal files (do not commit)
+.claude/settings.local.json
+CLAUDE.local.md

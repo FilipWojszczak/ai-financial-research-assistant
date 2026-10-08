@@ -81,6 +81,7 @@ async def wait_until(check, *, description, processes):
 async def flow(private_database, tmp_path, monkeypatch):
     settings = get_settings()
     broker = Connection(settings.broker_url)
+    assert broker.hostname and broker.userid and broker.password
     host = broker.hostname
     if ":" in host:
         host = f"[{host}]"

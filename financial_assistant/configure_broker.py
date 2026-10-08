@@ -24,7 +24,10 @@ _MANAGEMENT_TIMEOUT_SECONDS = 5
 def policy_request(broker_url: str, management_port: int, consumer_timeout: int):
     """Build the management API request that sets the ingestion queue policy."""
     broker = Connection(broker_url)
-    host = f"[{broker.hostname}]" if ":" in broker.hostname else broker.hostname
+    hostname = broker.hostname
+    if hostname is None:
+        raise ValueError("The broker URL has no hostname")
+    host = f"[{hostname}]" if ":" in hostname else hostname
     scheme = "https" if broker.ssl else "http"
     vhost = quote(broker.virtual_host or "/", safe="")
     url = (

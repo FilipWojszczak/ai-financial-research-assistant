@@ -177,7 +177,10 @@ async def test_process_document_communities_saves_communities_and_memberships():
     assert all(c.document_id == 1 for c in communities)
     assert all(c.title == "Test Title" for c in communities)
     assert all(c.summary == "Test summary." for c in communities)
-    assert {community.embedding[0] for community in communities} == {0.1, 0.2}
+    assert {c.embedding[0] for c in communities if c.embedding is not None} == {
+        0.1,
+        0.2,
+    }
 
     member_ids_by_community = {
         community.id: {

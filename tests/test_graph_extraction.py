@@ -30,7 +30,9 @@ def _make_extraction_result(
 ) -> ExtractionResult:
     return ExtractionResult(
         entities=[
-            ExtractedEntity(name=name, type=etype, description=None)
+            ExtractedEntity.model_validate(
+                {"name": name, "type": etype, "description": None}
+            )
             for name, etype in entities
         ],
         relationships=[

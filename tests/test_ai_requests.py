@@ -1,8 +1,10 @@
 import asyncio
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.embeddings import Embeddings
 from tests.utils import provider_error
 
 from financial_assistant.ai.requests import (
@@ -101,7 +103,7 @@ async def test_embedding_deadline_applies_to_each_batch_not_total_work():
         "financial_assistant.ai.requests.get_settings",
         return_value=_settings(llm=0.01, embedding=0.15),
     ):
-        result = await embed_texts(model, texts)
+        result = await embed_texts(cast(Embeddings, model), texts)
     assert result == [[float(i)] for i in range(65)]
     assert model.aembed_documents.await_count == 5
     assert all(
@@ -125,7 +127,7 @@ async def test_stalled_embedding_batch_is_resent_without_redoing_earlier_batches
         "financial_assistant.ai.requests.get_settings",
         return_value=_settings(embedding=0.01),
     ):
-        result = await embed_texts(model, texts)
+        result = await embed_texts(cast(Embeddings, model), texts)
     assert result == [[float(i)] for i in range(40)]
     # Three batches plus one resend of the stalled second batch.
     assert model.aembed_documents.await_count == 4

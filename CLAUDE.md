@@ -19,7 +19,7 @@ Notatki dla Filipa (komentarze HTML są usuwane, zanim plik trafi do Claude, wi�
 - Sync dependencies: `uv sync`
 - Unit tests: `uv run pytest -m unit -q`
 - Fast tests (no network, no DB): `uv run pytest -m "not llm and not db" -x -q` (unit tests plus env-gated tests that skip without services)
-- Integration tests (Postgres or RabbitMQ must be running): `uv run pytest -m integration -x -q`
+- Integration tests (Postgres must be running; also RabbitMQ with `RUN_RABBITMQ_TESTS=1`): `uv run pytest -m integration -x -q`
 - E2E tests (Postgres + RabbitMQ): `RUN_INGESTION_TESTS=1 uv run pytest -m e2e -x -q`
 - Single test: `uv run pytest tests/path/test_file.py::test_name -x -q`
 - DB tests (Postgres must be running): `uv run pytest -m db -x -q`
@@ -31,7 +31,7 @@ Notatki dla Filipa (komentarze HTML są usuwane, zanim plik trafi do Claude, wi�
 - Migrations: `uv run alembic revision --autogenerate -m "<msg>"`, `uv run alembic upgrade head`
 - Tests are split into tiers by directory and marker: `tests/unit/` (`unit`, no external dependencies), `tests/integration/` (`integration`, exactly one real dependency: Postgres or RabbitMQ), `tests/e2e/` (`e2e`, API → RabbitMQ → real Celery worker → Postgres with fake models) and `tests/llm/` (`llm`, paid APIs). Inside each tier, files mirror the `financial_assistant` layout. Every test module declares `pytestmark = pytest.mark.<tier>`; markers are the selection mechanism.
 - `tests/conftest.py` marks every test that uses a fixture in `_DB_FIXTURES` (`session`, `private_database`, `outbox_db`; directly or via `client`/factories) as `db` automatically. A new fixture that connects to Postgres must be added to that set. Shared Postgres/API fixtures live in `tests/fixtures/database.py` and are imported only by the `integration` and `e2e` conftests. `llm` tests are skipped unless `RUN_LLM_TESTS=1`, so a plain `uv run pytest` (what CI runs) never calls paid APIs.
-- Integration tests are additionally gated by env vars (`RUN_INGESTION_TESTS=1`, `RUN_RABBITMQ_TESTS=1`, need Postgres + RabbitMQ); CI sets both.
+- `RUN_RABBITMQ_TESTS=1` gates the RabbitMQ integration test (`tests/integration/core/test_messaging.py`) and `RUN_INGESTION_TESTS=1` gates the e2e test (both need Postgres + RabbitMQ); CI sets both.
 
 ## Architecture
 - `financial_assistant/api`: FastAPI app (`server.py`), routers for auth and documents. `core`: settings, DB session/pools, Celery app, RabbitMQ messaging, outbox, document storage. `models`/`schemas`: SQLAlchemy and Pydantic. `alembic/`: migrations.

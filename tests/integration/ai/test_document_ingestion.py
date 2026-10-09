@@ -30,6 +30,8 @@ from financial_assistant.models.document import (
     ParentChunk,
 )
 
+pytestmark = pytest.mark.integration
+
 _MODULE = "financial_assistant.ai.document_ingestion"
 
 

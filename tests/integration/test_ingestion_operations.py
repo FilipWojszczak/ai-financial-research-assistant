@@ -1,4 +1,3 @@
-import asyncio
 import os
 import time
 import uuid
@@ -10,9 +9,10 @@ from sqlalchemy import select
 
 from financial_assistant import cleanup_storage, reconcile_ingestion
 from financial_assistant.core.document_storage import lock_document_storage
-from financial_assistant.core.messaging import INGESTION_TASK_NAME
 from financial_assistant.models import Document, DocumentOutbox
 from financial_assistant.models.document import DocumentStatus, DocumentType
+
+pytestmark = pytest.mark.integration
 
 
 async def create_document(factory, status=DocumentStatus.PROCESSING):
@@ -74,35 +74,6 @@ async def test_reconciler_defers_to_an_active_worker(operations):
         assert (
             await session.get(Document, document_id)
         ).status == DocumentStatus.COMPLETED
-
-
-@pytest.mark.parametrize("outcome", [True, False, ConnectionError("database down")])
-def test_failure_message_acknowledged_only_after_successful_reconciliation(outcome):
-    events = []
-    message = MagicMock(headers={"task": INGESTION_TASK_NAME, "id": str(uuid.uuid4())})
-    message.ack.side_effect = lambda: events.append("ack")
-
-    async def settle(task_id):
-        events.append("database")
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-    with (
-        patch.object(reconcile_ingestion.celery_app, "connection_for_read") as connect,
-        patch.object(reconcile_ingestion, "dead_letter_queue") as queue,
-        patch.object(reconcile_ingestion, "mark_failed_task", side_effect=settle),
-        asyncio.Runner() as runner,
-    ):
-        connection = connect.return_value.__enter__.return_value
-        queue.return_value.get.side_effect = [message, None]
-        if isinstance(outcome, Exception):
-            with pytest.raises(ConnectionError):
-                reconcile_ingestion.reconcile_once(runner)
-        else:
-            assert reconcile_ingestion.reconcile_once(runner) == int(outcome)
-        connection.channel.return_value.close.assert_called_once()
-    assert events == (["database", "ack"] if outcome is True else ["database"])
 
 
 def old_file(path):

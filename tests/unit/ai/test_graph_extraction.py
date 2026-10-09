@@ -12,6 +12,8 @@ from financial_assistant.ai.graph_extraction import (
 from financial_assistant.models.document import ParentChunk
 from financial_assistant.models.graph import Entity, EntityRelationship
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # process_document_graph - mocked LLM and session
 # ---------------------------------------------------------------------------

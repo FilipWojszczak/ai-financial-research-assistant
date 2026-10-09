@@ -5,6 +5,8 @@ import pytest
 
 from financial_assistant.publish_outbox import _main, run_publisher
 
+pytestmark = pytest.mark.unit
+
 _MODULE = "financial_assistant.publish_outbox"
 
 

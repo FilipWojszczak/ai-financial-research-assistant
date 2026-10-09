@@ -12,6 +12,8 @@ from financial_assistant.core.document_storage import (
     store_document_file,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _settings(storage_path):
     return SimpleNamespace(document_storage_path=storage_path)

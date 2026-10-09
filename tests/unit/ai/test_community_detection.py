@@ -16,6 +16,8 @@ from financial_assistant.models.graph import (
     GraphCommunityMembership,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_entity(entity_id: int, name: str = "Entity") -> Entity:
     entity = MagicMock(spec=Entity)

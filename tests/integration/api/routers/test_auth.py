@@ -1,5 +1,9 @@
+import pytest
 from httpx import AsyncClient
+
 from tests.utils import TokenFactory, UserFactory
+
+pytestmark = pytest.mark.integration
 
 
 async def test_authentication(client: AsyncClient):

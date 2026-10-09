@@ -33,11 +33,14 @@ from financial_assistant.models.graph import (
 )
 from financial_assistant.utils import create_access_token
 
-pytestmark = pytest.mark.skipif(
-    os.getenv("RUN_INGESTION_TESTS") != "1",
-    reason="Requires RUN_INGESTION_TESTS=1, PostgreSQL, and RabbitMQ management",
-)
-ROOT = Path(__file__).resolve().parents[1]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.skipif(
+        os.getenv("RUN_INGESTION_TESTS") != "1",
+        reason="Requires RUN_INGESTION_TESTS=1, PostgreSQL, and RabbitMQ management",
+    ),
+]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def pdf_bytes():
@@ -170,7 +173,7 @@ async def flow(private_database, tmp_path, monkeypatch):
         ) as client:
 
             async def upload(failure=False):
-                await start("tests.ingestion_worker", failure=failure)
+                await start("tests.e2e.ingestion_worker", failure=failure)
 
                 async def ready():
                     return (tmp_path / "ready").exists()

@@ -12,6 +12,8 @@ from financial_assistant.ai.document_ingestion import (
 from financial_assistant.models.document import Document, DocumentStatus
 from financial_assistant.tasks.document_ingestion import _run_attempt
 
+pytestmark = pytest.mark.unit
+
 PIPELINE = "financial_assistant.ai.document_ingestion"
 
 

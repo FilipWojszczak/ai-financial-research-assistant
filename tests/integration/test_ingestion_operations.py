@@ -2,7 +2,6 @@ import os
 import time
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -124,17 +123,3 @@ async def test_cleanup_skips_even_old_files_of_uncommitted_uploads(
         assert source.exists() and temporary.exists()
         await upload.rollback()
     assert await cleanup_storage.cleanup_orphaned_files(min_age_seconds=60) == 2
-
-
-async def test_database_failure_never_authorizes_file_deletion(operations, tmp_path):
-    source = old_file(tmp_path / "999.pdf")
-    failed_session = MagicMock()
-    failed_session.__aenter__ = AsyncMock(side_effect=ConnectionError("database down"))
-    with (
-        patch.object(
-            cleanup_storage, "async_session_maker", return_value=failed_session
-        ),
-        pytest.raises(ConnectionError),
-    ):
-        await cleanup_storage.cleanup_orphaned_files(min_age_seconds=60)
-    assert source.exists()

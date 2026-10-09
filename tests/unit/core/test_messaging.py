@@ -10,6 +10,8 @@ from financial_assistant.core.messaging import (
 )
 from financial_assistant.core.outbox import publish_ingestion
 
+pytestmark = pytest.mark.unit
+
 
 def test_failure_destination_is_declared_before_work_queue():
     channel = MagicMock()

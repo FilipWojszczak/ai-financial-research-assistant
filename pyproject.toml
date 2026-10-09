@@ -91,7 +91,11 @@ exclude = ["**/__pycache__", ".venv", "alembic/versions", "data"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 env = ["ENVIRONMENT=testing"]
+addopts = "--strict-markers"
 markers = [
+  "unit: no external dependencies (fakes only)",
+  "integration: one real dependency (Postgres or RabbitMQ), everything else faked",
+  "e2e: full pipeline with a real Celery worker, RabbitMQ and Postgres",
   "llm: calls a real LLM/embedding API (costs money, slow)",
   "db: requires a running Postgres + pgvector",
 ]

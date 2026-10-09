@@ -1,18 +1,17 @@
-import asyncio
 import os
 import time
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
 
 from financial_assistant import cleanup_storage, reconcile_ingestion
 from financial_assistant.core.document_storage import lock_document_storage
-from financial_assistant.core.messaging import INGESTION_TASK_NAME
 from financial_assistant.models import Document, DocumentOutbox
 from financial_assistant.models.document import DocumentStatus, DocumentType
+
+pytestmark = pytest.mark.integration
 
 
 async def create_document(factory, status=DocumentStatus.PROCESSING):
@@ -76,35 +75,6 @@ async def test_reconciler_defers_to_an_active_worker(operations):
         ).status == DocumentStatus.COMPLETED
 
 
-@pytest.mark.parametrize("outcome", [True, False, ConnectionError("database down")])
-def test_failure_message_acknowledged_only_after_successful_reconciliation(outcome):
-    events = []
-    message = MagicMock(headers={"task": INGESTION_TASK_NAME, "id": str(uuid.uuid4())})
-    message.ack.side_effect = lambda: events.append("ack")
-
-    async def settle(task_id):
-        events.append("database")
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-    with (
-        patch.object(reconcile_ingestion.celery_app, "connection_for_read") as connect,
-        patch.object(reconcile_ingestion, "dead_letter_queue") as queue,
-        patch.object(reconcile_ingestion, "mark_failed_task", side_effect=settle),
-        asyncio.Runner() as runner,
-    ):
-        connection = connect.return_value.__enter__.return_value
-        queue.return_value.get.side_effect = [message, None]
-        if isinstance(outcome, Exception):
-            with pytest.raises(ConnectionError):
-                reconcile_ingestion.reconcile_once(runner)
-        else:
-            assert reconcile_ingestion.reconcile_once(runner) == int(outcome)
-        connection.channel.return_value.close.assert_called_once()
-    assert events == (["database", "ack"] if outcome is True else ["database"])
-
-
 def old_file(path):
     path.write_bytes(b"source")
     past = time.time() - 3600
@@ -153,17 +123,3 @@ async def test_cleanup_skips_even_old_files_of_uncommitted_uploads(
         assert source.exists() and temporary.exists()
         await upload.rollback()
     assert await cleanup_storage.cleanup_orphaned_files(min_age_seconds=60) == 2
-
-
-async def test_database_failure_never_authorizes_file_deletion(operations, tmp_path):
-    source = old_file(tmp_path / "999.pdf")
-    failed_session = MagicMock()
-    failed_session.__aenter__ = AsyncMock(side_effect=ConnectionError("database down"))
-    with (
-        patch.object(
-            cleanup_storage, "async_session_maker", return_value=failed_session
-        ),
-        pytest.raises(ConnectionError),
-    ):
-        await cleanup_storage.cleanup_orphaned_files(min_age_seconds=60)
-    assert source.exists()

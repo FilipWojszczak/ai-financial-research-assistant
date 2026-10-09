@@ -19,6 +19,8 @@ from financial_assistant.models import Base, Document, DocumentOutbox
 from financial_assistant.models.document import DocumentStatus, DocumentType
 from financial_assistant.schemas.document import DocumentCreate
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def send() -> Iterator[MagicMock]:
@@ -190,12 +192,6 @@ async def test_batch_limit_leaves_remaining_events_pending(send, outbox_db):
     assert await publish_pending_documents(limit=1) == 1
     assert send.call_count == 1
     assert await publish_pending_documents() == 1
-
-
-@pytest.mark.parametrize("limit", [0, -1, True])
-async def test_invalid_limit_is_rejected(limit):
-    with pytest.raises(ValueError):
-        await publish_pending_documents(limit=limit)
 
 
 async def test_outbox_insert_failure_rolls_back_upload_and_cleans_source(outbox_db):

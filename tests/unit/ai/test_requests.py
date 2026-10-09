@@ -5,13 +5,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.embeddings import Embeddings
-from tests.utils import provider_error
 
 from financial_assistant.ai.requests import (
     ai_request,
     embed_texts,
     is_permanent_provider_error,
 )
+from tests.utils import provider_error
+
+pytestmark = pytest.mark.unit
 
 
 def _settings(llm=1.0, embedding=1.0, attempts=3):

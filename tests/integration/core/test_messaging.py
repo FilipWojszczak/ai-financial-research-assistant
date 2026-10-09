@@ -17,10 +17,13 @@ from financial_assistant.core.messaging import (
     declare_ingestion_topology,
 )
 
-pytestmark = pytest.mark.skipif(
-    os.getenv("RUN_RABBITMQ_TESTS") != "1",
-    reason="Set RUN_RABBITMQ_TESTS=1 with an accessible test RabbitMQ broker",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.getenv("RUN_RABBITMQ_TESTS") != "1",
+        reason="Set RUN_RABBITMQ_TESTS=1 with an accessible test RabbitMQ broker",
+    ),
+]
 
 
 @pytest.fixture

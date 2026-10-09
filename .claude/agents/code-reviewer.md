@@ -16,6 +16,6 @@ Check for:
 - LangGraph: mutating state instead of returning updates, missing reducers for accumulating fields, loops without a termination condition.
 - Retrieval quality: changes to chunking, embedding model, entity dedup, community detection or BM25/dense fusion without a stated expected impact and a way to verify it.
 - Security: injection (SQL, shell, path), secrets in code or logs, unsafe deserialization.
-- Tests: new behavior without tests; tests that call real LLMs without `@pytest.mark.llm`; new Postgres fixtures not added to `_DB_FIXTURES` in `tests/conftest.py`; weakened assertions.
+- Tests: new behavior without tests; tests that call real LLMs without `@pytest.mark.llm`; new Postgres fixtures not added to `_DB_FIXTURES` in `tests/conftest.py`; new test module without a tier marker (`pytestmark = pytest.mark.<tier>`) or in a higher tier than it needs; weakened assertions.
 
 Report only issues that affect correctness, security, cost or the stated requirements. No style nits (ruff handles style). For each finding give: severity (high/medium/low), `file:line`, what is wrong, and a concrete fix. If you find nothing significant, say so explicitly instead of inventing minor issues.

@@ -1,7 +1,10 @@
 from io import StringIO
 
+import pytest
 from alembic import command
 from alembic.config import Config
+
+pytestmark = pytest.mark.unit
 
 
 def test_fresh_install_creates_each_enum_only_once():

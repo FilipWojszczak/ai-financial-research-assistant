@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from celery.exceptions import Reject, Retry
 from celery.result import EagerResult
-from tests.utils import provider_error
 
 from financial_assistant.ai.document_ingestion import (
     INGESTION_LOCK,
@@ -27,6 +26,9 @@ from financial_assistant.tasks.document_ingestion import (
     _run_attempt,
     ingest_document_task,
 )
+from tests.utils import provider_error
+
+pytestmark = pytest.mark.unit
 
 _TASK_MODULE = "financial_assistant.tasks.document_ingestion"
 _PIPELINE_MODULE = "financial_assistant.ai.document_ingestion"

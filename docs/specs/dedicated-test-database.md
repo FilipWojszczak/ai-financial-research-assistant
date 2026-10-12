@@ -17,7 +17,7 @@ Decisions taken during the interview:
 
 | Topic | Decision |
 | --- | --- |
-| How tests are redirected | Global: `tests/conftest.py` sets `DATABASE_URL_OVERRIDE` in `os.environ` in `pytest_configure` |
+| How tests are redirected | Global: `tests/conftest.py` sets `DATABASE_URL_OVERRIDE` in `os.environ` when it is imported |
 | Test DB lifecycle | Persistent; `CREATE DATABASE` if missing, `alembic upgrade head` once per pytest session |
 | Test DB name | Derived: dev database name + `_test`; no new setting |
 | How migrations run | `sys.executable -m alembic upgrade head` as a subprocess |
@@ -60,9 +60,12 @@ Use `sqlalchemy.engine.make_url(url).set(database=...)` and
 
 ### Global redirect (`tests/conftest.py`)
 
-Add a `pytest_configure(config)` hook. It runs before subdirectory conftests and test
-modules are imported, so before `financial_assistant/core/db.py` builds its module-level
-engine and before `financial_assistant/utils.py` calls `get_settings()` at import time.
+Call a `_redirect_to_test_database()` function at module level. pytest imports the root
+conftest before any conftest below it, so this runs before `financial_assistant/core/db.py`
+builds its module-level engine and before `financial_assistant/utils.py` calls
+`get_settings()` at import time. It must not be a pytest hook:
+conftests on the command-line paths (`pytest tests/integration/...`) are imported before
+any hook runs, and they import `core/db.py`.
 
 1. Build `Settings()` directly (not the cached `get_settings()`) and read
    `database_url`. If this fails (`ValueError` from the property, or pydantic
@@ -77,7 +80,7 @@ under `client` and by `core/outbox.py`), `tasks/document_ingestion.py`, fixtures
 e2e test then sets `DATABASE_URL_OVERRIDE` to its private-schema URL as before, which is
 still inside the test database.
 
-Import `Settings`/`get_settings` inside the hook, not at module top, so `tests/conftest.py`
+Import `Settings`/`get_settings` inside the function, not at module top, so `tests/conftest.py`
 stays light for collection.
 
 ### `migrated_database` fixture (`tests/fixtures/database.py`)
@@ -159,14 +162,15 @@ None. No LLM or embedding calls; nothing changes in what `llm` tests do.
 ## Edge cases
 
 - **Postgres not running:** `pytest -m unit` and the fast tests are unaffected
-  (`pytest_configure` only computes a URL; nothing connects). DB tests error in
+  (the redirect only computes a URL; nothing connects). DB tests error in
   `migrated_database` with the connection error.
 - **No database configuration** (no `POSTGRES_*`, no `DATABASE_URL_OVERRIDE`):
-  `pytest_configure` leaves the environment alone; behaviour stays as it is today.
+  the redirect leaves the environment alone; behaviour stays as it is today.
 - **`DATABASE_URL_OVERRIDE` already points at `*_test`** (e.g. set by hand, or a nested
   pytest run): the derivation is idempotent, so you never get `_test_test`.
 - **Guard:** `migrated_database` refuses to run unless the effective database name ends
-  in `_test`. This catches a hook that didn't run, or a later regression that lets
+  in `_test`, for both the settings and `core/db.py`'s engine. This catches a redirect that
+  didn't run or ran too late, or a later regression that lets
   something reset `DATABASE_URL_OVERRIDE`.
 - **Two pytest sessions at once** (Filip plus Claude): the advisory lock serializes
   create and migrate; afterwards, rollback and private schemas keep the tests isolated.
@@ -213,7 +217,7 @@ Run inside the Dev Container with `db` (and `rabbitmq` for the gated tests) runn
    `document_outbox` in `<POSTGRES_DB>` before and after steps 4 and 5, and
    `SELECT nspname FROM pg_namespace WHERE nspname LIKE '%_test_%'` returns no new schemas
    in it.
-8. Guard: the hook always re-derives the URL, so it can't be pointed at the dev database
+8. Guard: the redirect always re-derives the URL, so it can't be pointed at the dev database
    from outside. Check the guard's message by temporarily calling its assertion with a
    non-`_test` URL. Never run DDL on the dev database to "prove" it.
 9. `grep -rn "ENVIRONMENT\|env\.test\|pytest-env" --exclude-dir=.venv --exclude-dir=.git .`

@@ -1,4 +1,3 @@
-import os
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -100,6 +99,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    if os.getenv("ENVIRONMENT") == "testing":
-        return Settings(_env_file=".env.test")  # pyright: ignore[reportCallIssue]
     return Settings()  # pyright: ignore[reportCallIssue]

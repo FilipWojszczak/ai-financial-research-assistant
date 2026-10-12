@@ -114,7 +114,6 @@ async def flow(private_database, tmp_path, monkeypatch):
         )
         environment = {
             **os.environ,
-            "ENVIRONMENT": "testing",
             "DATABASE_URL_OVERRIDE": private_database.url.get_secret_value(),
             "RABBITMQ_URL_OVERRIDE": broker_url,
             "DOCUMENT_STORAGE_PATH": str(storage),

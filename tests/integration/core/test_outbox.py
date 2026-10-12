@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from starlette.datastructures import Headers
 
 from financial_assistant.api.routers.documents import upload_document
-from financial_assistant.core.config import get_settings
 from financial_assistant.core.outbox import publish_pending_documents
 from financial_assistant.models import Base, Document, DocumentOutbox
 from financial_assistant.models.document import DocumentStatus, DocumentType
@@ -29,11 +28,13 @@ def send() -> Iterator[MagicMock]:
 
 
 @pytest.fixture
-async def outbox_db() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+async def outbox_db(
+    migrated_database: str,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     # Use a private schema so the dispatcher never claims unrelated test data.
     schema = "outbox_test_" + uuid.uuid4().hex
     engine = create_async_engine(
-        get_settings().database_url,
+        migrated_database,
         execution_options={"schema_translate_map": {None: schema}},
     )
     async with engine.begin() as conn:

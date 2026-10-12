@@ -23,7 +23,6 @@
       "module": "pytest",
       "args": ["tests", "-v"],
       "env": {
-        "ENVIRONMENT": "testing",
         "RUN_RABBITMQ_TESTS": "1",
         "RUN_INGESTION_TESTS": "1"
       },

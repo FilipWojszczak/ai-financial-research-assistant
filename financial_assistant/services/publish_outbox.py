@@ -7,8 +7,8 @@ import math
 import signal
 from contextlib import suppress
 
-from .core.db import engine
-from .core.outbox import publish_pending_documents
+from ..core.db import engine
+from ..core.outbox import publish_pending_documents
 
 logger = logging.getLogger(__name__)
 

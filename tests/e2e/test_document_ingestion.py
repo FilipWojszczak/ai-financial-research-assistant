@@ -140,9 +140,9 @@ async def flow(private_database, tmp_path, monkeypatch):
             processes.append((process, module))
             return process
 
-        initialize = await start("financial_assistant.configure_broker")
+        initialize = await start("financial_assistant.services.configure_broker")
         assert await asyncio.wait_for(initialize.wait(), 20) == 0
-        processes.remove((initialize, "financial_assistant.configure_broker"))
+        processes.remove((initialize, "financial_assistant.services.configure_broker"))
 
         async def retention_ready():
             response = await management.get(f"/api/queues/{vhost}/{DEAD_LETTER_QUEUE}")
@@ -194,7 +194,7 @@ async def flow(private_database, tmp_path, monkeypatch):
                 assert response.json()["status"] == "processing"
                 document_id = response.json()["id"]
                 await start(
-                    "financial_assistant.publish_outbox",
+                    "financial_assistant.services.publish_outbox",
                     "--loop",
                     "--poll-interval",
                     "0.1",
@@ -299,7 +299,7 @@ async def test_ai_timeout_exhausts_retries_and_finishes_failed(flow):
         return await flow.queue_count() == 1
 
     await wait_until(parked, description="parked failure", processes=flow.processes)
-    await flow.start("financial_assistant.reconcile_ingestion", "--loop")
+    await flow.start("financial_assistant.services.reconcile_ingestion", "--loop")
 
     async def settled():
         return await flow.queue_count() == 0

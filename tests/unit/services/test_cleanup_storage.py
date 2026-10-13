@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from financial_assistant import cleanup_storage
+from financial_assistant.services import cleanup_storage
 
 pytestmark = pytest.mark.unit
 

@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from financial_assistant.publish_outbox import _main, run_publisher
+from financial_assistant.services.publish_outbox import _main, run_publisher
 
 pytestmark = pytest.mark.unit
 
-_MODULE = "financial_assistant.publish_outbox"
+_MODULE = "financial_assistant.services.publish_outbox"
 
 
 async def test_loop_recovers_from_database_error_and_sanitizes_logs(caplog):

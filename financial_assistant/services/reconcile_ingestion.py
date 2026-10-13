@@ -11,11 +11,11 @@ from contextlib import closing
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 
-from .core.celery_app import celery_app
-from .core.db import async_session_maker, engine
-from .core.messaging import INGESTION_TASK_NAME, dead_letter_queue
-from .models import Document, DocumentOutbox
-from .models.document import DocumentStatus
+from ..core.celery_app import celery_app
+from ..core.db import async_session_maker, engine
+from ..core.messaging import INGESTION_TASK_NAME, dead_letter_queue
+from ..models import Document, DocumentOutbox
+from ..models.document import DocumentStatus
 
 logger = logging.getLogger(__name__)
 

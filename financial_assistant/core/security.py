@@ -5,8 +5,8 @@ from pwdlib import PasswordHash
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .core.config import get_settings
-from .models import User
+from ..models import User
+from .config import get_settings
 
 settings = get_settings()
 SECRET_KEY = settings.secret_key

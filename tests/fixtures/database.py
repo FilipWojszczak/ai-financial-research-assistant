@@ -18,9 +18,9 @@ from financial_assistant.api.server import app
 from financial_assistant.core.config import get_settings
 from financial_assistant.core.db import engine as app_engine
 from financial_assistant.core.db import get_session
+from financial_assistant.core.security import create_access_token, hash_password
 from financial_assistant.models import Base, Document, User
 from financial_assistant.models.document import DocumentStatus, DocumentType
-from financial_assistant.utils import create_access_token, hash_password
 from tests.utils import DocumentFactory, TokenFactory, UserFactory
 
 ROOT = Path(__file__).resolve().parents[2]

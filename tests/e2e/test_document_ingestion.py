@@ -23,6 +23,7 @@ from financial_assistant.core import document_storage
 from financial_assistant.core.config import get_settings
 from financial_assistant.core.db import get_session
 from financial_assistant.core.messaging import DEAD_LETTER_QUEUE
+from financial_assistant.core.security import create_access_token
 from financial_assistant.models import Document, DocumentOutbox, User
 from financial_assistant.models.document import ChildChunk, ParentChunk
 from financial_assistant.models.graph import (
@@ -31,7 +32,6 @@ from financial_assistant.models.graph import (
     GraphCommunity,
     GraphCommunityMembership,
 )
-from financial_assistant.utils import create_access_token
 
 pytestmark = [
     pytest.mark.e2e,

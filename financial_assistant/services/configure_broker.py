@@ -9,9 +9,9 @@ from urllib.parse import quote
 
 from kombu import Connection
 
-from .core.celery_app import celery_app
-from .core.config import get_settings
-from .core.messaging import (
+from ..core.celery_app import celery_app
+from ..core.config import get_settings
+from ..core.messaging import (
     INGESTION_POLICY_NAME,
     declare_ingestion_topology,
     ingestion_policy,

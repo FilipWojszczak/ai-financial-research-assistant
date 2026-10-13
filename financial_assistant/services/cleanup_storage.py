@@ -12,10 +12,10 @@ from contextlib import suppress
 
 from sqlalchemy import select
 
-from .core.config import get_settings
-from .core.db import async_session_maker, engine
-from .core.document_storage import lock_document_storage
-from .models import Document
+from ..core.config import get_settings
+from ..core.db import async_session_maker, engine
+from ..core.document_storage import lock_document_storage
+from ..models import Document
 
 logger = logging.getLogger(__name__)
 _SOURCE = re.compile(r"([1-9][0-9]*)\.pdf")

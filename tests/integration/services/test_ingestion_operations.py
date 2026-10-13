@@ -6,10 +6,10 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from financial_assistant import cleanup_storage, reconcile_ingestion
 from financial_assistant.core.document_storage import lock_document_storage
 from financial_assistant.models import Document, DocumentOutbox
 from financial_assistant.models.document import DocumentStatus, DocumentType
+from financial_assistant.services import cleanup_storage, reconcile_ingestion
 
 pytestmark = pytest.mark.integration
 

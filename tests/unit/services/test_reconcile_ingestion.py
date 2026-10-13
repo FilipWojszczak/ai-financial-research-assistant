@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from financial_assistant import reconcile_ingestion
 from financial_assistant.core.messaging import INGESTION_TASK_NAME
+from financial_assistant.services import reconcile_ingestion
 
 pytestmark = pytest.mark.unit
 

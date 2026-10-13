@@ -79,7 +79,7 @@ services:
 
   broker-init:
     <<: *background-service
-    command: ["/opt/venv/bin/python", "-m", "financial_assistant.configure_broker"]
+    command: ["/opt/venv/bin/python", "-m", "financial_assistant.services.configure_broker"]
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -114,7 +114,7 @@ services:
     command:
       - /opt/venv/bin/python
       - -m
-      - financial_assistant.publish_outbox
+      - financial_assistant.services.publish_outbox
       - --loop
       - --poll-interval
       - "2"
@@ -130,7 +130,7 @@ services:
   failure-reconciler:
     <<: *background-service
     restart: unless-stopped
-    command: ["/opt/venv/bin/python", "-m", "financial_assistant.reconcile_ingestion", "--loop"]
+    command: ["/opt/venv/bin/python", "-m", "financial_assistant.services.reconcile_ingestion", "--loop"]
     stop_grace_period: 30s
     depends_on:
       migrate:
@@ -144,7 +144,7 @@ services:
     volumes:
       - .:/workspace:ro
       - document_storage:${DOCUMENT_STORAGE_PATH:?Set in .env}
-    command: ["/opt/venv/bin/python", "-m", "financial_assistant.cleanup_storage", "--loop"]
+    command: ["/opt/venv/bin/python", "-m", "financial_assistant.services.cleanup_storage", "--loop"]
     stop_grace_period: 60s
     depends_on:
       migrate:

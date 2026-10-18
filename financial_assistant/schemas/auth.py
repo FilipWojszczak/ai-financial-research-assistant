@@ -32,5 +32,12 @@ class PasswordUpdate(BaseModel):
 
 class AccountDelete(BaseModel):
     password: str
+    delete_documents: bool = Field(
+        default=False,
+        description=(
+            "Delete the documents you uploaded together with the account. By "
+            "default they are retained and become inaccessible."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")

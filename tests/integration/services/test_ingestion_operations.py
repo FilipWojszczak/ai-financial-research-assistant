@@ -1,13 +1,14 @@
 import os
 import time
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 
 from financial_assistant.core.document_storage import lock_document_storage
-from financial_assistant.models import Document, DocumentOutbox
+from financial_assistant.models import Document, DocumentOutbox, User
 from financial_assistant.models.document import DocumentStatus, DocumentType
 from financial_assistant.services import cleanup_storage, reconcile_ingestion
 
@@ -123,3 +124,29 @@ async def test_cleanup_skips_even_old_files_of_uncommitted_uploads(
         assert source.exists() and temporary.exists()
         await upload.rollback()
     assert await cleanup_storage.cleanup_orphaned_files(min_age_seconds=60) == 2
+
+
+async def test_cleanup_keeps_files_of_documents_owned_by_deleted_accounts(
+    operations, tmp_path
+):
+    async with operations() as session, session.begin():
+        owner = User(
+            email="deleted-1@deleted.invalid",
+            hashed_password="x",
+            is_active=False,
+            deleted_at=datetime.now(UTC),
+        )
+        session.add(owner)
+        await session.flush()
+        document = Document(
+            filename="orphaned.pdf",
+            company_ticker="TEST",
+            document_type=DocumentType.ANNUAL_REPORT,
+            year=2026,
+            owner_id=owner.id,
+        )
+        session.add(document)
+        await session.flush()
+        source = old_file(tmp_path / f"{document.id}.pdf")
+    assert await cleanup_storage.cleanup_orphaned_files(min_age_seconds=60) == 0
+    assert source.exists()

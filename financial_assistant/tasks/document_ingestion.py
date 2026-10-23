@@ -16,6 +16,7 @@ from ..ai.requests import is_permanent_provider_error
 from ..core.celery_app import celery_app
 from ..core.config import get_settings
 from ..core.messaging import INGESTION_TASK_NAME
+from ..core.tracing import trace_scope
 from .async_runner import get_worker_runner
 
 logger = logging.getLogger(__name__)
@@ -28,14 +29,22 @@ def _is_permanent(exc: BaseException) -> bool:
     return isinstance(exc, InvalidDocumentError) or is_permanent_provider_error(exc)
 
 
-async def _run_attempt(document_id: int, *, final_attempt: bool) -> None:
+async def _run_attempt(document_id: int, *, attempt: int, final_attempt: bool) -> None:
     # Own the database resources for this attempt. Never reuse the API's pool
     # or any connections inherited from a prefork parent.
     engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         try:
-            await ingest_document(document_id, session_factory=session_factory)
+            # Opened here, not in the task: this coroutine runs on the worker's
+            # persistent loop, which context set in the Celery thread doesn't reach.
+            with trace_scope(
+                "document_ingestion",
+                session_id=f"document-{document_id}",
+                tags=["ingestion"],
+                metadata={"attempt": str(attempt), "final_attempt": str(final_attempt)},
+            ):
+                await ingest_document(document_id, session_factory=session_factory)
         except DocumentBusyError:
             # Not a failure of this document: the active attempt decides its status.
             raise
@@ -75,7 +84,13 @@ def ingest_document_task(self, document_id: int) -> None:
 
     final_attempt = self.request.retries >= self.max_retries
     try:
-        get_worker_runner().run(_run_attempt(document_id, final_attempt=final_attempt))
+        get_worker_runner().run(
+            _run_attempt(
+                document_id,
+                attempt=self.request.retries + 1,
+                final_attempt=final_attempt,
+            )
+        )
     except DocumentBusyError:
         logger.info(
             "Document %d is being processed by another attempt; checking again in %d s",

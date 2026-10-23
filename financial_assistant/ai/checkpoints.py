@@ -8,6 +8,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..core.tracing import record_event
 from ..models.checkpoint import CheckpointKind, IngestionCheckpoint
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,8 @@ class AttemptCheckpoints:
         result = (await self._loaded()).get((kind, key))
         if result is not None:
             self.hits += 1
+            # The trace of a retried attempt shows which results were reused.
+            record_event("checkpoint_hit", {"kind": kind.value})
         return result
 
     async def put(self, kind: CheckpointKind, key: str, result: dict[str, Any]) -> None:

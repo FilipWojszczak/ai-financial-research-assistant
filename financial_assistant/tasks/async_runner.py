@@ -5,6 +5,8 @@ import os
 
 from celery.signals import worker_process_shutdown, worker_shutdown
 
+from ..core.tracing import shutdown_tracing
+
 _runner: asyncio.Runner | None = None
 _runner_pid: int | None = None
 
@@ -22,9 +24,10 @@ def get_worker_runner() -> asyncio.Runner:
 @worker_process_shutdown.connect
 @worker_shutdown.connect
 def close_worker_runner(**kwargs) -> None:
-    """Close the process's loop on graceful worker shutdown."""
+    """Close the process's loop and flush its traces on graceful worker shutdown."""
     global _runner, _runner_pid
     if _runner is not None and _runner_pid == os.getpid():
         _runner.close()
     _runner = None
     _runner_pid = None
+    shutdown_tracing()

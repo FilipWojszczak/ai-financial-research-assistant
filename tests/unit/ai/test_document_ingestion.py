@@ -91,7 +91,7 @@ async def test_terminal_failure_rolls_back_before_fresh_status_update(
         patch(f"{PIPELINE}.process_document_graph", new=AsyncMock(side_effect=error)),
         pytest.raises(RuntimeError, match="processing failed"),
     ):
-        await _run_attempt(42, final_attempt=True)
+        await _run_attempt(42, attempt=1, final_attempt=True)
 
     assert events == ["rollback", "status_commit"]
     assert factory.call_count == 2
@@ -107,7 +107,7 @@ async def test_terminal_failure_rolls_back_before_fresh_status_update(
 
 async def test_success_commits_completed_without_status_session(attempt):
     processing, status, factory, engine = attempt
-    await _run_attempt(42, final_attempt=False)
+    await _run_attempt(42, attempt=1, final_attempt=False)
     assert processing.get.return_value.status == DocumentStatus.COMPLETED
     assert processing.flush.await_count == 2
     # Checkpoints are deleted in the same transaction that marks the document done.
@@ -138,7 +138,7 @@ async def test_empty_chunks_are_permanent_failures(attempt, parents, children, m
         ),
         pytest.raises(InvalidDocumentError, match=message),
     ):
-        await _run_attempt(42, final_attempt=False)
+        await _run_attempt(42, attempt=1, final_attempt=False)
     processing.rollback.assert_awaited_once()
     processing.commit.assert_not_awaited()
     assert status.get.return_value.status == DocumentStatus.FAILED
@@ -150,7 +150,7 @@ async def test_empty_pdf_is_a_permanent_failure(attempt):
         patch(f"{PIPELINE}.load_pdf_documents", new=AsyncMock(return_value=[])),
         pytest.raises(InvalidDocumentError, match="PDF contains no readable pages"),
     ):
-        await _run_attempt(42, final_attempt=False)
+        await _run_attempt(42, attempt=1, final_attempt=False)
     processing.rollback.assert_awaited_once()
     assert status.get.return_value.status == DocumentStatus.FAILED
 
@@ -164,7 +164,7 @@ async def test_cancellation_rolls_back_and_allows_redelivery(attempt):
         ),
         pytest.raises(asyncio.CancelledError),
     ):
-        await _run_attempt(42, final_attempt=False)
+        await _run_attempt(42, attempt=1, final_attempt=False)
     processing.rollback.assert_awaited_once()
     factory.assert_called_once()
     status.commit.assert_not_awaited()

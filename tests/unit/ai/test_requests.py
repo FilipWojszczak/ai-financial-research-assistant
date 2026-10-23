@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -133,6 +134,26 @@ async def test_stalled_embedding_batch_is_resent_without_redoing_earlier_batches
     assert result == [[float(i)] for i in range(40)]
     # Three batches plus one resend of the stalled second batch.
     assert model.aembed_documents.await_count == 4
+
+
+async def test_each_embedding_call_is_traced_with_model_and_batch_size():
+    observed = []
+
+    @contextmanager
+    def observation(model_name, count):
+        observed.append((model_name, count))
+        yield
+
+    async def embed(batch):
+        return [[0.0] for _ in batch]
+
+    model = SimpleNamespace(model="models/test-embedding", aembed_documents=embed)
+    with (
+        patch("financial_assistant.ai.requests.get_settings", return_value=_settings()),
+        patch("financial_assistant.ai.requests.embedding_observation", new=observation),
+    ):
+        await embed_texts(cast(Embeddings, model), ["text"] * 20)
+    assert observed == [("models/test-embedding", 16), ("models/test-embedding", 4)]
 
 
 async def test_embed_texts_rejects_blank_texts_before_calling_the_model():

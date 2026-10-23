@@ -30,7 +30,7 @@ async def embed(texts):
     return [[0.1] * 768 for _ in texts]
 
 
-async def extract(prompt):
+async def extract(prompt, config=None):
     task = cast(Task, current_task)
     with (directory / "attempts").open("a") as log:
         log.write(f"{task.request.retries}\n")
@@ -50,7 +50,7 @@ async def extract(prompt):
     )
 
 
-async def summarize(prompt):
+async def summarize(prompt, config=None):
     return CommunitySummary(title="Acme leadership", summary="Alice leads Acme.")
 
 

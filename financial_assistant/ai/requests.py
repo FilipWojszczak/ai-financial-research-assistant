@@ -9,6 +9,7 @@ from google.genai.errors import ClientError
 from langchain_core.embeddings import Embeddings
 
 from ..core.config import get_settings
+from ..core.tracing import embedding_observation
 
 logger = logging.getLogger(__name__)
 _EMBEDDING_BATCH_SIZE = 16
@@ -69,6 +70,16 @@ async def ai_request[T](
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _model_name(model: Embeddings) -> str:
+    return getattr(model, "model", None) or type(model).__name__
+
+
+async def _embed_batch(model: Embeddings, batch: list[str]) -> list[list[float]]:
+    # LangChain embeddings emit no callbacks: each provider call gets its own span.
+    with embedding_observation(_model_name(model), len(batch)):
+        return await model.aembed_documents(batch)
+
+
 async def embed_texts(model: Embeddings, texts: list[str]) -> list[list[float]]:
     blank = [index for index, text in enumerate(texts) if not text.strip()]
     if blank:
@@ -79,7 +90,7 @@ async def embed_texts(model: Embeddings, texts: list[str]) -> list[list[float]]:
     for start in range(0, len(texts), _EMBEDDING_BATCH_SIZE):
         batch = texts[start : start + _EMBEDDING_BATCH_SIZE]
         result = await ai_request(
-            partial(model.aembed_documents, batch),
+            partial(_embed_batch, model, batch),
             deadline_seconds=get_settings().embedding_request_timeout_seconds,
         )
         if len(result) != len(batch):

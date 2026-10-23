@@ -6,6 +6,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.tracing import langchain_callbacks
 from ..models.checkpoint import CheckpointKind
 from ..models.document import ParentChunk
 from ..models.graph import Entity, EntityRelationship, EntityType
@@ -81,7 +82,13 @@ Text:
 async def extract_entities_and_relationships(chunk_text: str) -> ExtractionResult:
     """Call the LLM to extract entities and relationships from a text chunk."""
     prompt = _EXTRACTION_PROMPT.format(text=chunk_text)
-    result = await ai_request(partial(_structured_extractor.ainvoke, prompt))
+    result = await ai_request(
+        partial(
+            _structured_extractor.ainvoke,
+            prompt,
+            config={"callbacks": langchain_callbacks(), "run_name": "graph_extraction"},
+        )
+    )
     return result  # type: ignore[return-value]
 
 

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.tracing import langchain_callbacks
 from ..models.checkpoint import CheckpointKind
 from ..models.graph import (
     Entity,
@@ -86,7 +87,14 @@ async def _generate_community_summary(
 
     try:
         response: CommunitySummary = await ai_request(  # type: ignore[assignment]
-            partial(_structured_summarizer.ainvoke, prompt)
+            partial(
+                _structured_summarizer.ainvoke,
+                prompt,
+                config={
+                    "callbacks": langchain_callbacks(),
+                    "run_name": "community_summary",
+                },
+            )
         )
         title, summary = response.title.strip(), response.summary.strip()
     except OutputParserException:

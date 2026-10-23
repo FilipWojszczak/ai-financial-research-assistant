@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import contextmanager
 from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -76,7 +77,7 @@ def test_successful_task_passes_only_document_id_to_attempt():
     with patch(f"{_TASK_MODULE}._run_attempt", new_callable=AsyncMock) as attempt:
         result = ingest_task.apply(args=(42,), throw=True)
     assert result.successful()
-    attempt.assert_awaited_once_with(42, final_attempt=False)
+    attempt.assert_awaited_once_with(42, attempt=1, final_attempt=False)
 
 
 @pytest.mark.parametrize(("retries", "delay"), [(0, 10), (1, 20), (2, 40)])
@@ -106,6 +107,7 @@ def test_persistent_error_stops_after_four_attempts():
         False,
         True,
     ]
+    assert [call.kwargs["attempt"] for call in attempt.await_args_list] == [1, 2, 3, 4]
 
 
 def test_invalid_pdf_is_not_retried():
@@ -216,7 +218,7 @@ async def test_attempt_marks_only_terminal_failure_and_closes_engine(
         patch(f"{_TASK_MODULE}._mark_document_failed", new_callable=AsyncMock) as mark,
         pytest.raises(type(error)),
     ):
-        await _run_attempt(42, final_attempt=final_attempt)
+        await _run_attempt(42, attempt=1, final_attempt=final_attempt)
     engine.dispose.assert_awaited_once_with()
     if marks_failed:
         mark.assert_awaited_once_with(42, session_factory=factory)
@@ -233,10 +235,47 @@ async def test_successful_attempt_disposes_engine_without_marking_failed():
         patch(f"{_TASK_MODULE}.ingest_document", new_callable=AsyncMock) as ingest,
         patch(f"{_TASK_MODULE}._mark_document_failed", new_callable=AsyncMock) as mark,
     ):
-        await _run_attempt(42, final_attempt=False)
+        await _run_attempt(42, attempt=1, final_attempt=False)
     ingest.assert_awaited_once_with(42, session_factory=factory)
     engine.dispose.assert_awaited_once_with()
     mark.assert_not_awaited()
+
+
+async def test_attempt_is_traced_while_the_document_is_ingested():
+    scopes = []
+    open_scopes = []
+
+    @contextmanager
+    def scope(name, **attributes):
+        scopes.append((name, attributes))
+        open_scopes.append(name)
+        try:
+            yield
+        finally:
+            open_scopes.remove(name)
+
+    async def ingest(document_id, *, session_factory):
+        # The scope is entered inside the coroutine, on the worker's event loop.
+        assert open_scopes == ["document_ingestion"]
+
+    with (
+        patch(f"{_TASK_MODULE}.create_async_engine", return_value=AsyncMock()),
+        patch(f"{_TASK_MODULE}.async_sessionmaker"),
+        patch(f"{_TASK_MODULE}.ingest_document", new=AsyncMock(side_effect=ingest)),
+        patch(f"{_TASK_MODULE}.trace_scope", new=scope),
+    ):
+        await _run_attempt(42, attempt=4, final_attempt=True)
+    assert scopes == [
+        (
+            "document_ingestion",
+            {
+                "session_id": "document-42",
+                "tags": ["ingestion"],
+                "metadata": {"attempt": "4", "final_attempt": "True"},
+            },
+        )
+    ]
+    assert open_scopes == []
 
 
 @pytest.mark.parametrize(

@@ -5,7 +5,6 @@ from typing import Any
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document as LangchainDocument
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf.errors import PdfReadError
 from sqlalchemy.exc import DBAPIError
@@ -15,14 +14,11 @@ from ..core.document_storage import document_file_path
 from ..models.document import ChildChunk, Document, DocumentStatus, ParentChunk
 from .checkpoints import AttemptCheckpoints, delete_checkpoints
 from .community_detection import process_document_communities
+from .embeddings import embeddings_model
 from .graph_extraction import process_document_graph
 from .requests import embed_texts
 
 logger = logging.getLogger(__name__)
-
-embeddings_model = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001", output_dimensionality=768
-)
 
 
 # SQLAlchemy renders this as SELECT ... FOR NO KEY UPDATE NOWAIT on PostgreSQL.

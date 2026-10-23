@@ -3,7 +3,7 @@ from functools import partial
 
 import networkx as nx
 from langchain_core.exceptions import OutputParserException
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,7 @@ from ..models.graph import (
     GraphCommunityMembership,
 )
 from .checkpoints import AttemptCheckpoints, checkpoint_key
+from .embeddings import embeddings_model as _embeddings_model
 from .requests import ai_request, embed_texts
 
 logger = logging.getLogger(__name__)
@@ -24,9 +25,6 @@ logger = logging.getLogger(__name__)
 _SUMMARY_MODEL = "gemini-3.6-flash"
 _summary_llm = ChatGoogleGenerativeAI(
     model=_SUMMARY_MODEL, temperature=0, max_retries=1
-)
-_embeddings_model = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001", output_dimensionality=768
 )
 
 

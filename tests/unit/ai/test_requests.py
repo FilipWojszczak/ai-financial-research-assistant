@@ -9,6 +9,7 @@ from langchain_core.embeddings import Embeddings
 
 from financial_assistant.ai.requests import (
     ai_request,
+    embed_query,
     embed_texts,
     is_permanent_provider_error,
 )
@@ -93,6 +94,58 @@ async def test_explicit_deadline_overrides_the_llm_default():
         pytest.raises(TimeoutError),
     ):
         await ai_request(slow, deadline_seconds=0.01)
+
+
+async def test_single_attempt_call_is_not_sent_again_after_a_stall():
+    calls = 0
+
+    async def hang():
+        nonlocal calls
+        calls += 1
+        await asyncio.Event().wait()
+
+    with (
+        patch(
+            "financial_assistant.ai.requests.get_settings",
+            return_value=_settings(llm=0.01, attempts=3),
+        ),
+        pytest.raises(TimeoutError),
+    ):
+        await ai_request(hang, attempts=1)
+    assert calls == 1
+
+
+async def test_embed_query_uses_the_embedding_deadline_and_checks_dimensions():
+    async def embed(text):
+        await asyncio.sleep(0.05)  # longer than the LLM deadline below
+        return [0.5] * 768
+
+    model = SimpleNamespace(aembed_query=AsyncMock(side_effect=embed))
+    with patch(
+        "financial_assistant.ai.requests.get_settings",
+        return_value=_settings(llm=0.01, embedding=1.0),
+    ):
+        assert await embed_query(cast(Embeddings, model), "data center revenue") == (
+            [0.5] * 768
+        )
+    model.aembed_query.assert_awaited_once_with("data center revenue")
+
+
+async def test_embed_query_rejects_a_wrong_dimension():
+    model = SimpleNamespace(aembed_query=AsyncMock(return_value=[0.5] * 3072))
+    with (
+        patch("financial_assistant.ai.requests.get_settings", return_value=_settings()),
+        pytest.raises(ValueError, match="3072 dimensions, expected 768"),
+    ):
+        await embed_query(cast(Embeddings, model), "revenue")
+
+
+@pytest.mark.parametrize("text", ["", "   \n"])
+async def test_embed_query_rejects_blank_text_before_calling_the_model(text):
+    model = SimpleNamespace(aembed_query=AsyncMock())
+    with pytest.raises(ValueError, match="empty query"):
+        await embed_query(cast(Embeddings, model), text)
+    model.aembed_query.assert_not_called()
 
 
 async def test_embedding_deadline_applies_to_each_batch_not_total_work():

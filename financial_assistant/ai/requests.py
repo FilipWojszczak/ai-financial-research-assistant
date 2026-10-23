@@ -10,6 +10,7 @@ from langchain_core.embeddings import Embeddings
 
 from ..core.config import get_settings
 from ..core.tracing import embedding_observation
+from .embeddings import EMBEDDING_DIMENSIONS
 
 logger = logging.getLogger(__name__)
 _EMBEDDING_BATCH_SIZE = 16
@@ -36,7 +37,10 @@ def is_permanent_provider_error(exc: BaseException) -> bool:
 
 
 async def ai_request[T](
-    call: Callable[[], Awaitable[T]], *, deadline_seconds: float | None = None
+    call: Callable[[], Awaitable[T]],
+    *,
+    deadline_seconds: float | None = None,
+    attempts: int | None = None,
 ) -> T:
     """
     Run one model call under a deadline. A call that stays silent past it is
@@ -44,6 +48,8 @@ async def ai_request[T](
     hang among hundreds of calls does not fail the whole ingestion attempt.
     `call` must create a fresh request each time it is invoked. Only timeouts are
     retried here; other errors propagate to the task's own retry policy.
+    A streamed call passes attempts=1: once tokens have reached the client,
+    sending it again would duplicate text.
     """
     settings = get_settings()
     deadline = (
@@ -51,7 +57,7 @@ async def ai_request[T](
         if deadline_seconds is None
         else deadline_seconds
     )
-    attempts = settings.ai_request_attempts
+    attempts = settings.ai_request_attempts if attempts is None else attempts
     for attempt in range(1, attempts + 1):
         try:
             # Cancellation finishes before control returns to the persistent loop.
@@ -98,3 +104,28 @@ async def embed_texts(model: Embeddings, texts: list[str]) -> list[list[float]]:
         embeddings.extend(result)
         logger.info("Embedded %d/%d texts", len(embeddings), len(texts))
     return embeddings
+
+
+async def _embed_query(model: Embeddings, text: str) -> list[float]:
+    with embedding_observation(_model_name(model), 1):
+        return await model.aembed_query(text)
+
+
+async def embed_query(model: Embeddings, text: str) -> list[float]:
+    """
+    Embed a search query. aembed_query uses task type RETRIEVAL_QUERY, the
+    asymmetric counterpart of the RETRIEVAL_DOCUMENT vectors stored at ingestion.
+    """
+    if not text.strip():
+        # Gemini answers 400 "content contains an empty Part".
+        raise ValueError("Cannot embed an empty query")
+    result = await ai_request(
+        partial(_embed_query, model, text),
+        deadline_seconds=get_settings().embedding_request_timeout_seconds,
+    )
+    if len(result) != EMBEDDING_DIMENSIONS:
+        raise ValueError(
+            f"Query embedding has {len(result)} dimensions, "
+            f"expected {EMBEDDING_DIMENSIONS}"
+        )
+    return result

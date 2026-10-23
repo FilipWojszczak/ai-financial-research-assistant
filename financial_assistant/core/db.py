@@ -7,7 +7,7 @@ from .config import get_settings
 
 database_url = get_settings().database_url
 
-engine = create_async_engine(database_url, echo=True)
+engine = create_async_engine(database_url, echo=get_settings().database_echo_enabled)
 
 async_session_maker = async_sessionmaker(
     engine,

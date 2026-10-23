@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 from urllib.parse import quote
 
 from pydantic import Field, SecretStr, computed_field, model_validator
@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     chat_answer_model: str = "gemini-3.6-flash"
     chat_answer_temperature: float = Field(default=0.2, ge=0, le=2)
     chat_answer_max_output_tokens: int = Field(default=1024, gt=0)
+    # Gemini 3 thinks by default and bills thinking as output: at its default level
+    # the answer model spent 730 thinking tokens on a 4-sentence answer.
+    chat_answer_thinking_level: Literal["minimal", "low", "medium", "high"] = "low"
     # Agent and grader calls get the normal stall retries. The streamed answer is
     # never sent again, and the whole turn has its own deadline.
     chat_agent_timeout_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)

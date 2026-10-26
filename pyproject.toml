@@ -102,12 +102,6 @@ markers = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-".claude/hooks/*.py" = [
-  "S110",   # best-effort hooks must never break the edit flow
-  "S603",   # fixed argv, no shell
-  "S607",   # git/uv resolved via PATH inside the dev container
-  "INP001", # standalone script, not part of a package
-]
 "tests/**/*.py" = [
   "S101", # asserts
   "S105", # hardcoded password strings

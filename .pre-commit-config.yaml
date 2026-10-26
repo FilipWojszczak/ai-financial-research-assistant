@@ -11,6 +11,9 @@ repos:
       # Prevent committing large files that might have been added by mistake
       - id: check-added-large-files
       - id: check-toml
+      # Never commit directly to main/master; work on feature branches
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, master]
 
   # Block commits that contain secrets (API keys, tokens, private keys), whoever staged them
   - repo: https://github.com/gitleaks/gitleaks

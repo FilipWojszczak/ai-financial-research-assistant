@@ -17,5 +17,6 @@ Follow the `llm-engineering` skill.
   - entity resolution/dedup: entities and relationship endpoints are keyed by `name.lower().strip()` (`ai/graph_extraction.py`);
   - community detection: networkx Louvain with `seed=42` (`ai/community_detection.py`);
   - BM25/dense fusion (normalization, weights, k), once hybrid retrieval exists.
+- Changing the chunking or the embedding model also requires re-embedding all documents (and, for the model, a migration): flag it and ask, never do it silently.
 - Model calls go through `ai_request`, and embeddings through `embed_texts` (both in `ai/requests.py`): they apply the per-call deadline, stall retries and embedding batching. Don't call `ainvoke`/`aembed_documents` directly.
 - AI results are cached per document in `AttemptCheckpoints` (`ai/checkpoints.py`), keyed by `sha256(model + prompt)`, so a retried ingestion reuses them. New per-document model calls should use it, too. A new `CheckpointKind` needs a migration (it is the Postgres enum `checkpoint_kind_enum`). Changing a prompt or model invalidates the existing checkpoints.

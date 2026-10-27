@@ -10,10 +10,8 @@ Notatki dla Filipa (komentarze HTML są usuwane, zanim plik trafi do Claude, wi�
 -->
 
 ## Environment
-- All code runs inside the Dev Container. Never install anything on the host.
-- Python dependencies are managed only with uv: `uv add <pkg>`, `uv add --dev <pkg>`, `uv remove <pkg>`. Never use pip, never edit `uv.lock` by hand.
 - Postgres + pgvector: compose service `db` (ParadeDB pg17, which provides pgvector and BM25), host port 5433 → container 5432. The app builds the URL from `POSTGRES_*` in `.env` (or `DATABASE_URL_OVERRIDE`), see `database_url` in `financial_assistant/core/config.py`. RabbitMQ (`rabbitmq` service) is configured the same way via `RABBITMQ_*`.
-- Secrets live in `.env`, which you cannot read. Variable names are documented in `.env.example`; when adding a new setting, update `.env.example` and the settings model together.
+- When adding a new setting, update `.env.example` and the settings model together.
 
 ## Commands
 - Sync dependencies: `uv sync`
@@ -25,10 +23,9 @@ Notatki dla Filipa (komentarze HTML są usuwane, zanim plik trafi do Claude, wi�
 - DB tests (Postgres must be running): `uv run pytest -m db -x -q`
 - Lint & format: `uv run ruff check --fix . && uv run ruff format .`
 - Type check: `uv run pyright`
-- Installed version of a library: `uv pip show <package>`
 - Run the API: `uv run uvicorn financial_assistant.api.server:app --reload --host 0.0.0.0 --port 8000`
 - Run ingestion / graph build: `docker compose up -d` starts the `migrate`, `broker-init`, `worker`, `outbox`, `failure-reconciler` and `storage-cleanup` services; ingestion is triggered by uploading a PDF through the API.
-- Orphaned documents (admin, dry run unless `--yes`): `uv run python -m financial_assistant.services.publish_orphaned_documents --list`, then `... --document-id <id> [--document-id <id> ...] --yes` to make chosen documents of deleted accounts public. `uv run python -m financial_assistant.services.purge_deleted_users --list`, then `... [--user-id <id> ...] --yes` removes tombstoned users that own no documents.
+- Admin scripts (orphaned documents, purging deleted users): see "Admin scripts" in `README.md`.
 - Migrations: `uv run alembic revision --autogenerate -m "<msg>"`, `uv run alembic upgrade head`
 - Test tiers (`unit`, `integration`, `e2e`, `llm`), markers, fixtures and env gates are described in `.claude/rules/tests.md`.
 - DB tests never touch the dev database: `tests/conftest.py` points `DATABASE_URL_OVERRIDE` at `<POSTGRES_DB>_test` on the same server and migrates it once per session. If that migration fails after a branch switch (the test DB is at a revision missing from the branch), ask user to run `DROP DATABASE "<POSTGRES_DB>_test" WITH (FORCE)` and rerun pytest.
@@ -40,9 +37,6 @@ Notatki dla Filipa (komentarze HTML są usuwane, zanim plik trafi do Claude, wi�
 - `ai/`: `document_ingestion` (PDF → parent/child chunks → embeddings), `graph_extraction` (LLM entities/relationships), `community_detection` (networkx, Louvain, plus LLM community summaries), `checkpoints` (reuse AI results of failed attempts), `requests` (timeouts/retries for model calls).
 - Models: Gemini via `langchain-google-genai`; embeddings `models/gemini-embedding-001` at 768 dims (`Vector(768)` in `models/document.py` and `models/graph.py`).
 - Not implemented yet: hybrid retrieval, the LangGraph agent and its API. `child_chunk` has a BM25 index (migration `95900fffcf36`); `init_langgraph_pool` in `core/db.py` is the only LangGraph piece so far.
-
-## Rules
-- The embedding dimension must match the pgvector column. Changing the embedding model or the chunking strategy requires a migration and re-embedding: flag it and ask, never do it silently.
 
 ## Compact instructions
 When compacting, keep: the current branch, the list of modified files, the verification commands used, and any failing tests with their error messages.

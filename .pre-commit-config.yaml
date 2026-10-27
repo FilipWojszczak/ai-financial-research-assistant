@@ -44,7 +44,8 @@ repos:
 
   # Python code formatting and linting
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.8
+    # Keep in sync with the ruff version in uv.lock, so the hook and `uv run ruff` agree
+    rev: v0.15.7
     hooks:
       - id: ruff
         args: ["--fix"]

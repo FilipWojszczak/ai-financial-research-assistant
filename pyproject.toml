@@ -48,8 +48,6 @@ src = ["financial_assistant"]
 extend-exclude = [".venv", "__pycache__", "build", "dist", "alembic"]
 # Honour the excludes even for explicitly passed paths (editors, hooks), as pre-commit does.
 force-exclude = true
-# Automatically fix issues where possible
-fix = true
 
 [tool.ruff.lint]
 select = [

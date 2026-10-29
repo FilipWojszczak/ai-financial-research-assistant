@@ -27,6 +27,7 @@ def fresh_process_state(monkeypatch):
     monkeypatch.setattr(tracing, "_client", None)
     monkeypatch.setattr(tracing, "_client_pid", None)
     monkeypatch.setattr(tracing, "_status_logged_pid", None)
+    monkeypatch.setattr(tracing, "_shutdown_pid", None)
 
 
 @pytest.fixture
@@ -148,6 +149,19 @@ def test_a_forked_process_builds_its_own_client(langfuse):
             child = tracing._get_client()
     assert child is not parent
     assert langfuse.call_count == 2
+
+
+def test_tracing_stays_off_in_a_process_after_shutdown(langfuse):
+    # A new client would reuse Langfuse's stopped resource manager (one per key),
+    # and the SDK hangs flushing it on the next shutdown.
+    with _use_settings(_settings()), patch(f"{_MODULE}.os.getpid", return_value=100):
+        tracing._get_client()
+        tracing.shutdown_tracing()
+        assert tracing._get_client() is None
+        assert tracing.langchain_callbacks() == []
+        tracing.shutdown_tracing()
+    langfuse.assert_called_once()
+    langfuse.return_value.shutdown.assert_called_once_with()
 
 
 def test_shutdown_is_idempotent_and_only_stops_this_process_client(langfuse):

@@ -26,6 +26,15 @@ def _redirect_to_test_database() -> None:
     get_settings.cache_clear()
 
 
+def _disable_tracing() -> None:
+    # Tests never send traces, whatever keys .env holds: environment variables take
+    # precedence over .env in pydantic-settings, blank keys disable core/tracing.py,
+    # and subprocesses (Alembic, e2e workers) inherit them.
+    os.environ["LANGFUSE_PUBLIC_KEY"] = ""
+    os.environ["LANGFUSE_SECRET_KEY"] = ""
+
+
+_disable_tracing()
 _redirect_to_test_database()
 
 

@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 _client: Langfuse | None = None
 _client_pid: int | None = None
 _status_logged_pid: int | None = None
+# Tracing stays off in a process after shutdown: Langfuse keeps one resource manager
+# per key, so a new client would reuse the stopped one, and SDK v4 then hangs
+# flushing it on the next shutdown.
+_shutdown_pid: int | None = None
 
 
 def tracing_enabled() -> bool:
@@ -41,7 +45,7 @@ def _get_client() -> Langfuse | None:
         _status_logged_pid = pid
         logger.info("Langfuse tracing is %s", "on" if enabled else "off")
     settings = get_settings()
-    if not enabled or settings.langfuse_secret_key is None:
+    if not enabled or settings.langfuse_secret_key is None or _shutdown_pid == pid:
         return None
     if _client is None or _client_pid != pid:
         # Built from Settings, not os.environ: .env reaches the app through
@@ -110,9 +114,11 @@ def record_event(name: str, metadata: dict[str, str]) -> None:
 
 
 def shutdown_tracing() -> None:
-    """Flush and stop this process's client; safe to call more than once."""
-    global _client, _client_pid
-    if _client is not None and _client_pid == os.getpid():
+    """Flush and stop this process's client for good; safe to call more than once."""
+    global _client, _client_pid, _shutdown_pid
+    pid = os.getpid()
+    if _client is not None and _client_pid == pid:
         _client.shutdown()
+        _shutdown_pid = pid
     _client = None
     _client_pid = None

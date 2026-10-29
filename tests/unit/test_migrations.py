@@ -15,6 +15,12 @@ def test_fresh_install_creates_each_enum_only_once():
     config.set_main_option("script_location", "alembic")
     command.upgrade(config, "head", sql=True)
     ddl = sql.getvalue()
-    for name in ("document_type_enum", "document_status_enum", "entity_type_enum"):
+    for name in (
+        "document_type_enum",
+        "document_status_enum",
+        "entity_type_enum",
+        "chat_turn_status_enum",
+    ):
         assert ddl.count(f"CREATE TYPE {name} AS ENUM") == 1
     assert "CREATE TABLE document_outbox" in ddl
+    assert "CREATE TABLE chat_turn" in ddl

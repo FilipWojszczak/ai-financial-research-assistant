@@ -5,7 +5,15 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -124,8 +132,16 @@ class ChildChunk(Base):
     )
     parent_chunk: Mapped[ParentChunk] = relationship(back_populates="child_chunks")
 
-    # Ensure that the combination of parent_id and chunk_index is unique to maintain the
-    # order of child chunks within each parent chunk
     __table_args__ = (
+        # Ensure that the combination of parent_id and chunk_index is unique to
+        # maintain the order of child chunks within each parent chunk
         UniqueConstraint("parent_id", "chunk_index", name="uix_parent_chunk_index"),
+        # Dense retrieval: queries must order by cosine distance (`<=>`) to use it.
+        Index(
+            "ix_child_chunk_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
     )

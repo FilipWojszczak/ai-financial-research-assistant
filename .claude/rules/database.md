@@ -10,5 +10,6 @@ Follow the `postgres-pgvector` skill.
 
 # Database rules (project-specific)
 
-- Migrations: `uv run alembic revision --autogenerate -m "<msg>"`, then review the generated file, then `uv run alembic upgrade head`. Indexes that are not declared in the SQLAlchemy models (like the ParadeDB BM25 index, `USING bm25`) are invisible to autogenerate: write them by hand with `op.execute`, with a matching `DROP INDEX IF EXISTS` in `downgrade` (see `95900fffcf36`). No HNSW/IVFFlat vector index exists yet.
+- Migrations: `uv run alembic revision --autogenerate -m "<msg>"`, then review the generated file, then `uv run alembic upgrade head`. Indexes that are not declared in the SQLAlchemy models (like the ParadeDB BM25 index, `USING bm25`) are invisible to autogenerate: write them by hand with `op.execute`, with a matching `DROP INDEX IF EXISTS` in `downgrade` (see `95900fffcf36`).
+- Vector indexes: `ix_child_chunk_embedding` (HNSW, `vector_cosine_ops`, declared on `ChildChunk`) is the only one, so dense queries over `child_chunk` must order by `<=>`. `graph_community.embedding` and `entity.embedding` have none.
 - Naming: singular snake_case tables (`document`, `child_chunk`, `entity_relationship`); indexes `ix_<table>_<column>`, BM25 indexes `<table>_bm25_idx`; unique constraints `uix_<…>`; Postgres enums `<name>_enum`.

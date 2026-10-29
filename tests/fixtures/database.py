@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from pydantic import SecretStr
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
@@ -16,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from financial_assistant.api.server import app
 from financial_assistant.core.config import get_settings
+from financial_assistant.core.db import create_langgraph_pool, get_session
 from financial_assistant.core.db import engine as app_engine
-from financial_assistant.core.db import get_session
 from financial_assistant.core.security import create_access_token, hash_password
 from financial_assistant.models import Base, Document, User
 from financial_assistant.models.document import DocumentStatus, DocumentType
@@ -26,6 +27,12 @@ from tests.utils import DocumentFactory, TokenFactory, UserFactory
 ROOT = Path(__file__).resolve().parents[2]
 # Arbitrary fixed key; concurrent pytest sessions serialize on it in "postgres".
 _MIGRATION_LOCK_KEY = 7_316_028_415
+# The DDL of migration 95900fffcf36. Base.metadata.create_all can't express a
+# ParadeDB BM25 index, so private schemas create it here for retrieval tests.
+BM25_INDEX_DDL = (
+    "CREATE INDEX child_chunk_bm25_idx ON {table} "
+    "USING bm25 (id, content) WITH (key_field = 'id')"
+)
 
 
 def _require_test_database(url: URL) -> str:
@@ -87,6 +94,23 @@ def migrated_database() -> str:
                         f'run DROP DATABASE "{database}" WITH (FORCE) and rerun '
                         f"pytest.\n{result.stderr}"
                     )
+                # The LangGraph checkpointer tables, as the compose migrate step does.
+                result = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                    [
+                        sys.executable,
+                        "-m",
+                        "financial_assistant.services.setup_checkpointer",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    cwd=ROOT,
+                    env={**os.environ, "DATABASE_URL_OVERRIDE": database_url},
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"setup_checkpointer failed on {database!r}.\n{result.stderr}"
+                    )
             finally:
                 connection.execute(
                     text("SELECT pg_advisory_unlock(:key)"),
@@ -113,6 +137,9 @@ async def private_database(migrated_database: str):
         async with engine.begin() as connection:
             await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
             await connection.run_sync(Base.metadata.create_all)
+            await connection.execute(
+                text(BM25_INDEX_DDL.format(table=f'"{schema}".child_chunk'))
+            )
         yield SimpleNamespace(
             url=SecretStr(url),
             factory=async_sessionmaker(engine, expire_on_commit=False),
@@ -121,6 +148,19 @@ async def private_database(migrated_database: str):
         async with engine.begin() as connection:
             await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def langgraph_checkpointer(
+    migrated_database: str,
+) -> AsyncGenerator[AsyncPostgresSaver]:
+    """The real checkpointer on the test database, through the app's pool."""
+    pool = create_langgraph_pool(migrated_database)
+    await pool.open()
+    try:
+        yield AsyncPostgresSaver(conn=pool)
+    finally:
+        await pool.close()
 
 
 @pytest_asyncio.fixture(name="session")

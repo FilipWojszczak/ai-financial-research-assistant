@@ -3,6 +3,7 @@
 from tests.fixtures.database import (
     client_fixture,
     document_factory_fixture,
+    langgraph_checkpointer,
     migrated_database,
     private_database,
     session_fixture,
@@ -13,6 +14,7 @@ from tests.fixtures.database import (
 __all__ = [
     "client_fixture",
     "document_factory_fixture",
+    "langgraph_checkpointer",
     "migrated_database",
     "private_database",
     "session_fixture",

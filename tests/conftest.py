@@ -5,7 +5,13 @@ import pytest
 # Any test that requests these (directly or through client/factories) hits Postgres.
 # outbox_db lives in tests/integration/core/test_outbox.py; add new module-level DB
 # fixtures here too.
-_DB_FIXTURES = {"migrated_database", "session", "private_database", "outbox_db"}
+_DB_FIXTURES = {
+    "migrated_database",
+    "session",
+    "private_database",
+    "outbox_db",
+    "langgraph_checkpointer",
+}
 
 
 def _redirect_to_test_database() -> None:

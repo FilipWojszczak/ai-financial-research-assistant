@@ -72,7 +72,16 @@ services:
 
   migrate:
     <<: *background-service
-    command: ["/opt/venv/bin/alembic", "upgrade", "head"]
+    # The LangGraph checkpointer tables are created by their own setup, not by
+    # Alembic (see services/setup_checkpointer.py); both steps are idempotent.
+    command:
+      - /bin/sh
+      # -c: run the next list item as a shell script (needed for &&).
+      - -c
+      # >-: fold the lines below into a single line, without a trailing newline.
+      - >-
+        /opt/venv/bin/alembic upgrade head &&
+        /opt/venv/bin/python -m financial_assistant.services.setup_checkpointer
     depends_on:
       db:
         condition: service_healthy

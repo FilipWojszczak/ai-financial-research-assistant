@@ -20,6 +20,7 @@ def test_fresh_install_creates_each_enum_only_once():
         "document_status_enum",
         "entity_type_enum",
         "chat_turn_status_enum",
+        "checkpoint_kind_enum",
     ):
         assert ddl.count(f"CREATE TYPE {name} AS ENUM") == 1
     assert "CREATE TABLE document_outbox" in ddl

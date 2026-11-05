@@ -5,7 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from functools import partial
 
-from google.genai.errors import ClientError
+from google.genai.errors import APIError, ClientError
 from langchain_core.embeddings import Embeddings
 
 from ..core.config import get_settings
@@ -19,21 +19,31 @@ _STALL_RETRY_DELAY_SECONDS = 2
 _RETRYABLE_CLIENT_CODES = frozenset({408, 409, 429})
 
 
+def _provider_error(exc: BaseException) -> APIError | None:
+    """LangChain wraps the SDK's errors, so the exception chain is searched."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, APIError):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def is_provider_error(exc: BaseException) -> bool:
+    """True when the model provider answered with an HTTP error of any kind."""
+    return _provider_error(exc) is not None
+
+
 def is_permanent_provider_error(exc: BaseException) -> bool:
     """
     True when the model provider rejected the request itself (HTTP 4xx such as
     400 INVALID_ARGUMENT or 401/403). Sending the same request again cannot help,
     so retrying would only repeat the document's earlier model calls.
-    LangChain wraps the SDK's ClientError, so the exception chain is searched.
     """
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        if isinstance(current, ClientError):
-            return current.code not in _RETRYABLE_CLIENT_CODES
-        current = current.__cause__ or current.__context__
-    return False
+    error = _provider_error(exc)
+    return isinstance(error, ClientError) and error.code not in _RETRYABLE_CLIENT_CODES
 
 
 async def ai_request[T](

@@ -12,6 +12,7 @@ from financial_assistant.ai.requests import (
     embed_query,
     embed_texts,
     is_permanent_provider_error,
+    is_provider_error,
 )
 from tests.utils import provider_error
 
@@ -236,3 +237,10 @@ async def test_embed_texts_rejects_blank_texts_before_calling_the_model():
 )
 def test_only_provider_rejections_are_permanent(error, permanent):
     assert is_permanent_provider_error(error) is permanent
+
+
+def test_any_provider_http_error_is_found_in_the_exception_chain():
+    assert is_provider_error(provider_error(400)) is True
+    assert is_provider_error(provider_error(429)) is True
+    assert is_provider_error(provider_error(503)) is True
+    assert is_provider_error(ConnectionError("network down")) is False

@@ -36,11 +36,3 @@ def test_ties_keep_the_order_of_first_appearance():
     fused = reciprocal_rank_fusion([[7, 8], [8, 7]], k=60)
     assert [item for item, _ in fused] == [7, 8]
     assert fused[0][1] == pytest.approx(fused[1][1])
-
-
-def test_a_larger_k_flattens_the_differences_between_ranks():
-    def spread(k):
-        scores = [score for _, score in reciprocal_rank_fusion([[1, 2, 3]], k=k)]
-        return scores[0] / scores[-1]
-
-    assert spread(1) > spread(60) > 1

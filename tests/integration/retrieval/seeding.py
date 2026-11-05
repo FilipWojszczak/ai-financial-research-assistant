@@ -62,7 +62,13 @@ class Seeder:
         year: int = 2025,
         filename: str = "acme.pdf",
     ) -> SeededDocument:
-        """`parents` lists each parent's child chunks as (content, embedding)."""
+        """`parents` lists each parent's child chunks as (content, embedding).
+
+        Each parent's content is a plain space-joined concatenation of its children.
+        Real ingestion splits children from the parent with overlap, so this is only
+        a simplification that preserves "parent contains every child"; don't assert
+        on exact parent text or on terms that span chunk boundaries.
+        """
         async with self.factory() as session:
             document = Document(
                 filename=filename,

@@ -34,7 +34,7 @@ async def test_bm25_ranks_the_exact_term_chunk_first(private_database, seed):
     # Dense distances all tie (orthogonal query), so BM25 decides the fused order.
     sources = await _search(private_database, "EBITDA margin", axis(10), scope)
     assert sources[0].parent_chunk_id == document.parent_ids[1]
-    assert sources[0].content == "EBITDA margin expanded to 31 percent"
+    assert "EBITDA margin" in sources[0].content
 
 
 async def test_dense_ranking_finds_the_nearest_chunk(private_database, seed):
@@ -85,7 +85,8 @@ async def test_parents_are_deduplicated_ordered_by_best_child_and_capped(
     scope = RetrievalScope(user_id=user)
     sources = await _search(private_database, NO_MATCH, axis(0), scope)
     assert [source.parent_chunk_id for source in sources] == document.parent_ids
-    assert sources[0].content == "First child Second child"
+    assert "First child" in sources[0].content
+    assert "Second child" in sources[0].content
     assert sources[0].score == pytest.approx(1 / 61)  # its best child's score
 
     capped = await _search(

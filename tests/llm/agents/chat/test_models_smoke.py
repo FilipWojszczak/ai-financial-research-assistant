@@ -10,9 +10,7 @@ from itertools import pairwise
 import pytest
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import BaseModel, Field
 
 from financial_assistant.agents.chat.models import (
     LOWEST_THINKING_LEVEL,
@@ -21,6 +19,7 @@ from financial_assistant.agents.chat.models import (
     RetrievalGrade,
     create_chat_models,
 )
+from financial_assistant.agents.chat.tools import CHAT_TOOLS, SearchDocumentsArgs
 from financial_assistant.core.config import get_settings
 
 pytestmark = pytest.mark.llm
@@ -34,16 +33,6 @@ SOURCES = (
     "$251.3 million and the Retail segment $161.4 million.</source>\n"
     "</sources>"
 )
-
-
-class SearchArgs(BaseModel):
-    query: str = Field(description="What to search for in the documents")
-
-
-@tool("search_documents", args_schema=SearchArgs)
-def search_documents(query: str) -> str:
-    """Search the user's financial documents."""
-    return ""
 
 
 @pytest.fixture
@@ -72,12 +61,15 @@ async def test_agent_is_forced_to_search_then_reads_the_results(models):
         ),
         HumanMessage(QUESTION),
     ]
-    first = await models.agent.bind_tools(
-        [search_documents], tool_choice="any"
-    ).ainvoke(messages, config=config)
+    first = await models.agent.bind_tools(CHAT_TOOLS, tool_choice="any").ainvoke(
+        messages, config=config
+    )
     assert isinstance(first, AIMessage)
     assert first.tool_calls
     assert {call["name"] for call in first.tool_calls} == {"search_documents"}
+    # What the model sends must pass the tool's own validation.
+    for call in first.tool_calls:
+        SearchDocumentsArgs.model_validate(call["args"])
 
     # Round 2 sends the tool calls back with their results and a reviewer note.
     # Gemini 3 rejects function calls returned without their thought signatures.
@@ -96,9 +88,9 @@ async def test_agent_is_forced_to_search_then_reads_the_results(models):
             "different query."
         ),
     ]
-    second = await models.agent.bind_tools(
-        [search_documents], tool_choice="auto"
-    ).ainvoke(round_two, config=config)
+    second = await models.agent.bind_tools(CHAT_TOOLS, tool_choice="auto").ainvoke(
+        round_two, config=config
+    )
     assert isinstance(second, AIMessage)
     print(f"\nround 2 tool calls: {second.tool_calls}")
     _usage_of(usage, get_settings().chat_agent_model)

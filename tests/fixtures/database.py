@@ -15,6 +15,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from financial_assistant.agents.chat.state import chat_serializer
 from financial_assistant.api.server import app
 from financial_assistant.core.config import get_settings
 from financial_assistant.core.db import create_langgraph_pool, get_session
@@ -158,7 +159,7 @@ async def langgraph_checkpointer(
     pool = create_langgraph_pool(migrated_database)
     await pool.open()
     try:
-        yield AsyncPostgresSaver(conn=pool)
+        yield AsyncPostgresSaver(conn=pool, serde=chat_serializer())
     finally:
         await pool.close()
 

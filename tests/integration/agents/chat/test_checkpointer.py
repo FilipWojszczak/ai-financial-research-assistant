@@ -1,7 +1,20 @@
 import uuid
+from dataclasses import replace
 
 import pytest
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import empty_checkpoint
+
+from financial_assistant.agents.chat.graph import build_chat_graph
+from financial_assistant.agents.chat.models import RetrievalGrade
+from tests.utils import (
+    FakeHybridRetriever,
+    chat_context,
+    chunk_source,
+    community_source,
+    fake_chat_models,
+    tool_call_message,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -38,3 +51,45 @@ async def test_delete_thread_removes_its_checkpoints_only(langgraph_checkpointer
         assert await langgraph_checkpointer.aget_tuple(_config(kept)) is not None
     finally:
         await langgraph_checkpointer.adelete_thread(kept)
+
+
+async def test_the_graph_persists_state_across_runs_until_the_thread_is_deleted(
+    langgraph_checkpointer,
+):
+    models = fake_chat_models(
+        [tool_call_message("revenue")],
+        answer=[{"answer": "Revenue grew [1].", "cited_refs": [1]}],
+    )
+    retriever = FakeHybridRetriever([chunk_source(1), community_source(1)])
+    graph = build_chat_graph(models, checkpointer=langgraph_checkpointer)
+    first = chat_context(retriever)
+    thread_id = str(first.thread_id)
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    try:
+        for context, question in (
+            (first, "First"),
+            (replace(first, turn_id=uuid.uuid4()), "Second"),
+        ):
+            async for _ in graph.astream(
+                {"question": question},
+                config=config,
+                context=context,
+                stream_mode="custom",
+                durability="exit",
+            ):
+                pass
+
+        state = (await graph.aget_state(config)).values
+        assert [message.content for message in state["messages"]] == [
+            "First",
+            "Revenue grew [1].",
+            "Second",
+            "Revenue grew [1].",
+        ]
+        # Our types survive the round trip through Postgres.
+        cited = state["cited_sources"][str(first.turn_id)]
+        assert cited == [{"ref": 1, "source": chunk_source(1)}]
+        assert isinstance(state["grade"], RetrievalGrade)
+    finally:
+        await langgraph_checkpointer.adelete_thread(thread_id)
+    assert (await graph.aget_state(config)).values == {}

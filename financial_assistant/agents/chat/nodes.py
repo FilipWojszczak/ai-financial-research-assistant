@@ -107,7 +107,9 @@ class ChatNodes:
         context = runtime.context
         settings = context.settings
         system_prompt = AGENT_SYSTEM_PROMPT.format(
-            documents=render_documents(context.scope_documents)
+            documents=render_documents(
+                context.scope_documents, context.unlisted_documents
+            )
         )
         messages = [
             SystemMessage(system_prompt),

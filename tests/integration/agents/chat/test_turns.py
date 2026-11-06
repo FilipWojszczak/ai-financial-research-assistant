@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from langchain_core.messages.ai import UsageMetadata
@@ -19,6 +20,7 @@ from financial_assistant.retrieval.types import RetrievalScope
 
 pytestmark = pytest.mark.integration
 
+_TURNS_MODULE = "financial_assistant.agents.chat.turns"
 STALE_AFTER = timedelta(seconds=360)
 USAGE: dict[str, UsageMetadata] = {
     "model-a": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
@@ -235,9 +237,17 @@ async def test_scope_documents_are_the_accessible_completed_ones(private_databas
             ]
         )
         await session.commit()
-        documents = await load_scope_documents(session, RetrievalScope(user_id=user_id))
+        scope = RetrievalScope(user_id=user_id)
+        documents, unlisted = await load_scope_documents(session, scope)
         assert {item.id for item in documents} == {public.id, own.id}
+        assert unlisted == 0
         assert documents[0].company_ticker == "ACME"
         assert documents[0].document_type == DocumentType.ANNUAL_REPORT
         empty = RetrievalScope(user_id=user_id, company_ticker="NONE")
-        assert await load_scope_documents(session, empty) == ()
+        assert await load_scope_documents(session, empty) == ((), 0)
+
+        # Beyond the cap, documents are counted rather than listed.
+        with patch(f"{_TURNS_MODULE}._MAX_SCOPE_DOCUMENTS", 1):
+            documents, unlisted = await load_scope_documents(session, scope)
+        assert [item.id for item in documents] == [min(public.id, own.id)]
+        assert unlisted == 1

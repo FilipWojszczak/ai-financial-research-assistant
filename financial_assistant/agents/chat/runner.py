@@ -241,7 +241,7 @@ class ChatTurnRunner:
             company_ticker=thread.company_ticker,
         )
         async with self._session_factory() as session:
-            scope_documents = await load_scope_documents(session, scope)
+            scope_documents, unlisted = await load_scope_documents(session, scope)
         if not scope_documents:
             # No model calls and no checkpoint: there is nothing to search.
             queue.put_nowait(ChatEvent("token", TokenEvent(text=NO_DOCUMENTS_ANSWER)))
@@ -261,6 +261,7 @@ class ChatTurnRunner:
             session_factory=self._session_factory,
             retriever=self._retriever,
             settings=settings,
+            unlisted_documents=unlisted,
         )
         answer: dict[str, Any] | None = None
         # Every client event comes from the custom stream, so the agent's and

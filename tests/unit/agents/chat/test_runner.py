@@ -79,7 +79,7 @@ def finish():
 @pytest.fixture(autouse=True)
 def scope_documents():
     with patch(
-        f"{_MODULE}.load_scope_documents", new=AsyncMock(return_value=DOCUMENTS)
+        f"{_MODULE}.load_scope_documents", new=AsyncMock(return_value=(DOCUMENTS, 3))
     ) as mock:
         yield mock
 
@@ -161,6 +161,7 @@ async def test_the_graph_runs_with_the_thread_scope_and_exit_durability(finish):
     assert context.scope.document_ids == (3, 4)
     assert context.scope.company_ticker == "ACME"
     assert context.scope_documents == DOCUMENTS
+    assert context.unlisted_documents == 3
 
 
 async def test_the_turn_is_recorded_before_done_reaches_the_client(finish):
@@ -242,7 +243,7 @@ async def test_shutdown_cancels_running_turns_and_lets_them_finish(finish):
 async def test_no_documents_in_scope_answers_without_running_the_graph(
     finish, scope_documents
 ):
-    scope_documents.return_value = ()
+    scope_documents.return_value = ((), 0)
     graph = FakeGraph()
     events = await _collect(_stream(_runner(graph)))
     assert graph.runs == []

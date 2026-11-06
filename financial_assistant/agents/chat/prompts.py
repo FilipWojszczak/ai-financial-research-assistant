@@ -88,7 +88,7 @@ def _source_text(source: Source) -> str:
     return f"{source.title}: {source.summary}"
 
 
-def render_documents(documents: Sequence[ScopeDocument]) -> str:
+def render_documents(documents: Sequence[ScopeDocument], unlisted: int = 0) -> str:
     lines = [
         _escape_tags(
             f"- {document.company_ticker} {document.document_type.value} "
@@ -96,6 +96,8 @@ def render_documents(documents: Sequence[ScopeDocument]) -> str:
         )
         for document in documents
     ]
+    if unlisted:
+        lines.append(f"- and {unlisted} more, not listed here but covered by search")
     return "\n".join(["<documents>", *lines, "</documents>"])
 
 

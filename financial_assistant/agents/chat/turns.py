@@ -121,21 +121,27 @@ async def finish_turn(
 
 async def load_scope_documents(
     session: AsyncSession, scope: RetrievalScope
-) -> tuple[ScopeDocument, ...]:
-    """Metadata of the documents a turn can search; empty if there are none."""
-    rows = await session.execute(
+) -> tuple[tuple[ScopeDocument, ...], int]:
+    """
+    Metadata of the documents a turn can search, empty if there are none, and how
+    many more are in scope beyond the ones the agent prompt lists.
+    """
+    result = await session.execute(
         select(
             Document.id,
             Document.filename,
             Document.company_ticker,
             Document.document_type,
             Document.year,
+            # A window function is computed before LIMIT: the size of the whole scope.
+            func.count().over().label("total"),
         )
         .where(Document.id.in_(accessible_documents(scope)))
         .order_by(Document.id)
         .limit(_MAX_SCOPE_DOCUMENTS)
     )
-    return tuple(
+    rows = result.all()
+    documents = tuple(
         ScopeDocument(
             id=row.id,
             filename=row.filename,
@@ -145,3 +151,4 @@ async def load_scope_documents(
         )
         for row in rows
     )
+    return documents, rows[0].total - len(rows) if rows else 0

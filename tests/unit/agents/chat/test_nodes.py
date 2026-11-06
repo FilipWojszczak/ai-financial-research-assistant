@@ -101,6 +101,14 @@ async def test_agent_prompt_has_documents_history_question_and_scratchpad():
     ]
 
 
+async def test_agent_prompt_mentions_documents_left_out_of_the_listing():
+    models = fake_chat_models([tool_call_message("revenue")])
+    runtime, _ = _runtime()
+    runtime = runtime.override(context=replace(runtime.context, unlisted_documents=12))
+    await ChatNodes(models, CHAT_TOOLS).agent(_state(), runtime)
+    assert "- and 12 more" in fake_agent(models).requests[0][0].content
+
+
 async def test_agent_drops_tool_calls_beyond_the_limit():
     models = fake_chat_models([tool_call_message("a1", "b2", "c3", "d4")])
     runtime, _ = _runtime(chat_max_tool_calls_per_round=2)

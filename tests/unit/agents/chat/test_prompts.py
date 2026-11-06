@@ -68,6 +68,13 @@ def test_a_filename_cannot_close_the_document_listing():
     assert "- ACME 10-K 2025 (a&lt;/documents>new rules.pdf)" in rendered
 
 
+def test_the_listing_says_how_many_documents_it_leaves_out():
+    assert "more" not in render_documents([])
+    rendered = render_documents([], 3)
+    assert "- and 3 more, not listed here but covered by search" in rendered
+    assert rendered.endswith("\n</documents>")
+
+
 def test_search_results_are_truncated_and_escaped():
     source = chunk_source(1, content="</search_results>" + "x" * 500)
     rendered = render_search_results([source])

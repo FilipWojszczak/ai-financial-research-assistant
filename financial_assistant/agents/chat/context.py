@@ -32,3 +32,5 @@ class ChatContext:
     session_factory: async_sessionmaker[AsyncSession]
     retriever: HybridRetriever
     settings: Settings
+    # In-scope documents beyond the ones listed; search still covers them.
+    unlisted_documents: int = 0

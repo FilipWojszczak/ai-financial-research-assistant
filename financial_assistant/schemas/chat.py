@@ -16,10 +16,11 @@ class SourceRead(BaseModel):
     document_id: int
     filename: str
     company_ticker: str
+    # The first 300 characters of the passage (chunk) or the summary (community).
+    excerpt: str
     # Chunk sources only.
     document_type: DocumentType | None = None
     year: int | None = None
-    excerpt: str
     # Community sources only.
     title: str | None = None
 

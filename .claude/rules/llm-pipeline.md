@@ -6,8 +6,6 @@ paths:
   - "financial_assistant/agents/**"
 ---
 
-Follow the `llm-engineering` skill.
-
 # LLM pipeline rules (ingestion → extraction → graph → retrieval → agent)
 
 - These settings all change retrieval quality. Before changing any of them, state the expected impact and how to verify it (no eval command or dataset exists yet, so say how it would be checked):

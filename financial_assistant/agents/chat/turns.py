@@ -1,5 +1,6 @@
 """Database side of a chat turn: concurrency guard, budget and accounting."""
 
+import math
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -9,7 +10,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...models import ChatThread, ChatTurn, Document
+from ...models import ChatThread, ChatTurn, Document, User
 from ...models.chat import ChatTurnStatus
 from ...retrieval.scope import accessible_documents
 from ...retrieval.types import RetrievalScope
@@ -25,12 +26,22 @@ class ThreadBusyError(Exception):
     """Another turn of this thread is running."""
 
 
+class ThreadGoneError(Exception):
+    """The thread was deleted before the turn could be claimed."""
+
+
 def thread_title(question: str) -> str:
     return " ".join(question.split())[:_TITLE_CHARS]
 
 
 def _utc_midnight() -> datetime:
     return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def seconds_until_utc_midnight() -> int:
+    """When the daily token budget resets."""
+    reset = _utc_midnight() + timedelta(days=1)
+    return max(1, math.ceil((reset - datetime.now(UTC)).total_seconds()))
 
 
 async def tokens_used_today(session: AsyncSession, user_id: int) -> int:
@@ -41,6 +52,40 @@ async def tokens_used_today(session: AsyncSession, user_id: int) -> int:
         ).where(ChatTurn.user_id == user_id, ChatTurn.started_at >= _utc_midnight())
     )
     return int(used or 0)
+
+
+async def completed_turns(
+    session: AsyncSession, *, thread_id: UUID, user_id: int
+) -> int:
+    # user_id is redundant (the thread's owner), but it is the indexed column.
+    count = await session.scalar(
+        select(func.count())
+        .select_from(ChatTurn)
+        .where(
+            ChatTurn.user_id == user_id,
+            ChatTurn.thread_id == thread_id,
+            ChatTurn.status == ChatTurnStatus.COMPLETED,
+        )
+    )
+    return int(count or 0)
+
+
+async def busy_seconds(
+    session: AsyncSession, thread_id: UUID, *, stale_after: timedelta
+) -> int | None:
+    """
+    Seconds until the thread's running turn counts as abandoned at the latest (a
+    Retry-After value), or None if no turn is running.
+    """
+    started_at = await session.scalar(
+        select(ChatTurn.started_at).where(
+            ChatTurn.thread_id == thread_id, ChatTurn.active(stale_after)
+        )
+    )
+    if started_at is None:
+        return None
+    remaining = started_at + stale_after - datetime.now(UTC)
+    return max(1, math.ceil(remaining.total_seconds()))
 
 
 async def claim_turn(
@@ -55,6 +100,21 @@ async def claim_turn(
     turn. A row lock (the ingestion pattern) would pin a pooled connection for the
     whole stream; a crashed API is handled by the stale timeout instead.
     """
+    # The locks the insert's foreign keys take anyway, taken first and in the order
+    # deletions use (user, thread, turns), so they can't deadlock. If a deletion got
+    # there first, this waits for it and finds no row.
+    await session.execute(
+        select(User.id)
+        .where(User.id == user_id)
+        .with_for_update(read=True, key_share=True)
+    )
+    thread = await session.scalar(
+        select(ChatThread.id)
+        .where(ChatThread.id == thread_id)
+        .with_for_update(read=True, key_share=True)
+    )
+    if thread is None:
+        raise ThreadGoneError
     await session.execute(
         update(ChatTurn)
         .where(
@@ -94,6 +154,13 @@ async def finish_turn(
 ) -> None:
     """Record the turn's outcome; `title` names a thread that has no title yet."""
     async with session_factory() as session:
+        # The thread before the turn, the order deletions use.
+        turn_thread = select(ChatTurn.thread_id).where(ChatTurn.id == turn_id)
+        await session.execute(
+            select(ChatThread.id)
+            .where(ChatThread.id == turn_thread.scalar_subquery())
+            .with_for_update(key_share=True)
+        )
         thread_id = await session.scalar(
             update(ChatTurn)
             .where(ChatTurn.id == turn_id)

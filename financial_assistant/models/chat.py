@@ -6,17 +6,19 @@ queries: ownership, filters, concurrency and token usage.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
+    ColumnElement,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     String,
     Uuid,
+    and_,
     func,
     text,
 )
@@ -110,3 +112,11 @@ class ChatTurn(Base):
             postgresql_where=text("status = 'running'"),
         ),
     )
+
+    @classmethod
+    def active(cls, stale_after: timedelta) -> ColumnElement[bool]:
+        """Running and not stale: a stale turn was abandoned (e.g. the API crashed)."""
+        return and_(
+            cls.status == ChatTurnStatus.RUNNING,
+            cls.started_at >= func.now() - stale_after,
+        )

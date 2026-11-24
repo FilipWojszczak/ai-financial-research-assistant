@@ -493,7 +493,7 @@ async def test_delete_documents_while_one_is_ingesting_returns_409(
 
     assert response.status_code == 409
     assert response.json()["detail"].startswith("A document is still being processed")
-    # The delete waited for the lock up to DOCUMENT_LOCK_TIMEOUT (5s) instead of failing
+    # The delete waited for the lock up to LOCK_TIMEOUT (5s) instead of failing
     # fast (> 4s), and did not hang (< 15s, slack for slow CI).
     assert 4 < elapsed < 15
     async with factory() as check:

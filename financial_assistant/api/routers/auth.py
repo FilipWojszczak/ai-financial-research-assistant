@@ -3,16 +3,24 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...core.accounts import AccountChangedError, DocumentsBusyError, delete_account
+from ...core.accounts import (
+    AccountBusyError,
+    AccountChangedError,
+    ChatBusyError,
+    DocumentsBusyError,
+    delete_account,
+)
 from ...core.db import get_session
 from ...core.document_storage import delete_document_file
 from ...core.security import authenticate_user, create_access_token, hash_password
 from ...models import User
 from ...schemas.auth import AccountDelete, PasswordUpdate, Token, UserCreate, UserRead
 from ..dependencies.auth import get_current_user
+from ..dependencies.chat import get_checkpointer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -134,12 +142,15 @@ async def update_password(
         "inaccessible to everyone until an administrator publishes them. With "
         "`delete_documents=true` they are deleted together with the account; this "
         "returns 409 and changes nothing while one of them is still being processed."
+        "\n\nChats are always deleted; this returns 409 and changes nothing while a "
+        "chat message is still being answered."
     ),
 )
 async def delete_my_account(
     payload: AccountDelete,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    checkpointer: Annotated[BaseCheckpointSaver, Depends(get_checkpointer)],
 ):
     if not await authenticate_user(user.email, payload.password, session):
         raise HTTPException(
@@ -150,9 +161,24 @@ async def delete_my_account(
 
     try:
         deleted_ids = await delete_account(
-            session, user, delete_documents=payload.delete_documents
+            session,
+            user,
+            delete_documents=payload.delete_documents,
+            checkpointer=checkpointer,
         )
         await session.commit()
+    except ChatBusyError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A chat message is still being answered; try again later",
+        ) from exc
+    except AccountBusyError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Another request is using the account; try again later",
+        ) from exc
     except DocumentsBusyError as exc:
         await session.rollback()
         raise HTTPException(

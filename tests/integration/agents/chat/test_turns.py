@@ -1,5 +1,6 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.messages.ai import UsageMetadata
@@ -7,12 +8,17 @@ from sqlalchemy import delete, select, update
 
 from financial_assistant.agents.chat.turns import (
     ThreadBusyError,
+    ThreadGoneError,
+    busy_seconds,
     claim_turn,
+    completed_turns,
     finish_turn,
     load_scope_documents,
+    seconds_until_utc_midnight,
     thread_title,
     tokens_used_today,
 )
+from financial_assistant.api.routers.chat import delete_thread
 from financial_assistant.models import ChatThread, ChatTurn, Document, User
 from financial_assistant.models.chat import ChatTurnStatus
 from financial_assistant.models.document import DocumentStatus, DocumentType
@@ -68,6 +74,131 @@ async def test_a_second_claim_on_the_same_thread_is_refused(private_database):
     with pytest.raises(ThreadBusyError):
         await _claim(factory, thread)
     assert (await _get(factory, ChatTurn, first.id)).status == ChatTurnStatus.RUNNING
+
+
+async def test_a_claim_racing_a_deletion_finds_the_thread_gone(private_database):
+    # A stale turn makes the claim and the deletion touch the same chat_turn row:
+    # both lock the thread first, so they queue up instead of deadlocking.
+    factory = private_database.factory
+    thread = await _thread(factory, await _user(factory))
+    stale = await _claim(factory, thread)
+    async with factory() as session:
+        await session.execute(
+            update(ChatTurn)
+            .where(ChatTurn.id == stale.id)
+            .values(started_at=datetime.now(UTC) - STALE_AFTER - timedelta(seconds=1))
+        )
+        await session.commit()
+
+    deleting, release = asyncio.Event(), asyncio.Event()
+
+    async def adelete_thread(thread_id):
+        deleting.set()
+        await release.wait()
+
+    async with factory() as session:
+        user = await session.get(User, thread.user_id)
+        deletion = asyncio.create_task(
+            delete_thread(
+                thread.id, session, user, AsyncMock(adelete_thread=adelete_thread)
+            )
+        )
+        await asyncio.wait_for(deleting.wait(), timeout=5)
+        claim = asyncio.create_task(_claim(factory, thread))
+        await asyncio.sleep(0.5)
+        assert not claim.done()  # Waits for the deletion's lock.
+        release.set()
+        await asyncio.wait_for(deletion, timeout=5)
+    with pytest.raises(ThreadGoneError):
+        await asyncio.wait_for(claim, timeout=5)
+
+
+async def test_a_claim_locks_the_user_before_the_thread(private_database):
+    # The order of delete_account; the other way round, the two could deadlock.
+    factory = private_database.factory
+    thread = await _thread(factory, await _user(factory))
+    async with factory() as deletion:
+        user = await deletion.get(User, thread.user_id, with_for_update=True)
+        claim = asyncio.create_task(_claim(factory, thread))
+        await asyncio.sleep(0.5)
+        assert not claim.done()
+        await deletion.get(ChatThread, thread.id, with_for_update={"nowait": True})
+        await deletion.delete(user)
+        await deletion.commit()
+    with pytest.raises(ThreadGoneError):
+        await asyncio.wait_for(claim, timeout=5)
+
+
+async def test_finishing_locks_the_thread_before_the_turn(private_database):
+    factory = private_database.factory
+    thread = await _thread(factory, await _user(factory))
+    turn = await _claim(factory, thread)
+    async with factory() as deletion:
+        await deletion.get(ChatThread, thread.id, with_for_update=True)
+        finish = asyncio.create_task(
+            finish_turn(
+                factory,
+                turn.id,
+                status=ChatTurnStatus.COMPLETED,
+                usage={},
+                error_code=None,
+            )
+        )
+        await asyncio.sleep(0.5)
+        assert not finish.done()
+        await deletion.get(ChatTurn, turn.id, with_for_update={"nowait": True})
+        await deletion.rollback()
+        await asyncio.wait_for(finish, timeout=5)
+    assert (await _get(factory, ChatTurn, turn.id)).status == ChatTurnStatus.COMPLETED
+
+
+async def test_busy_seconds_bounds_the_wait_for_a_running_turn(private_database):
+    factory = private_database.factory
+    thread = await _thread(factory, await _user(factory))
+
+    async def busy():
+        async with factory() as session:
+            return await busy_seconds(session, thread.id, stale_after=STALE_AFTER)
+
+    assert await busy() is None
+    turn = await _claim(factory, thread)
+    remaining = await busy()
+    assert remaining is not None
+    assert 340 < remaining <= 361  # Slack for clock differences with Postgres.
+    async with factory() as session:
+        await session.execute(
+            update(ChatTurn)
+            .where(ChatTurn.id == turn.id)
+            .values(started_at=datetime.now(UTC) - STALE_AFTER - timedelta(seconds=5))
+        )
+        await session.commit()
+    assert await busy() is None
+
+
+async def test_completed_turns_counts_only_completed_ones_of_the_thread(
+    private_database,
+):
+    factory = private_database.factory
+    user_id = await _user(factory)
+    thread = await _thread(factory, user_id)
+    other = await _thread(factory, user_id)
+    async with factory() as session:
+        session.add_all(
+            ChatTurn(thread_id=thread_id, user_id=user_id, status=status)
+            for thread_id, status in (
+                (thread.id, ChatTurnStatus.COMPLETED),
+                (thread.id, ChatTurnStatus.COMPLETED),
+                (thread.id, ChatTurnStatus.FAILED),
+                (thread.id, ChatTurnStatus.CANCELLED),
+                (other.id, ChatTurnStatus.COMPLETED),
+            )
+        )
+        await session.commit()
+        assert await completed_turns(session, thread_id=thread.id, user_id=user_id) == 2
+
+
+def test_seconds_until_utc_midnight_is_within_a_day():
+    assert 1 <= seconds_until_utc_midnight() <= 24 * 60 * 60
 
 
 async def test_claims_on_different_threads_and_after_finishing_succeed(

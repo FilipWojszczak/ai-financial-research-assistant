@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from pydantic import SecretStr
 from sqlalchemy import create_engine, text
@@ -16,6 +17,7 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from financial_assistant.agents.chat.state import chat_serializer
+from financial_assistant.api.dependencies.chat import get_checkpointer
 from financial_assistant.api.server import app
 from financial_assistant.core.config import get_settings
 from financial_assistant.core.db import create_langgraph_pool, get_session
@@ -180,12 +182,31 @@ async def session_fixture(migrated_database: str) -> AsyncGenerator[AsyncSession
     await engine.dispose()
 
 
+@pytest.fixture(name="session_factory")
+def session_factory_fixture(session: AsyncSession) -> async_sessionmaker[AsyncSession]:
+    """Sessions on the test connection, for code that opens and commits its own."""
+    return async_sessionmaker(
+        bind=session.bind,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+
+
+@pytest.fixture(name="chat_checkpointer")
+def chat_checkpointer_fixture() -> InMemorySaver:
+    return InMemorySaver(serde=chat_serializer())
+
+
 @pytest_asyncio.fixture(name="client")
-async def client_fixture(session: AsyncSession) -> AsyncGenerator[AsyncClient]:
+async def client_fixture(
+    session: AsyncSession, chat_checkpointer: InMemorySaver
+) -> AsyncGenerator[AsyncClient]:
     async def get_session_override():
         return session
 
     app.dependency_overrides[get_session] = get_session_override
+    # The lifespan, which creates the real one, doesn't run in tests.
+    app.dependency_overrides[get_checkpointer] = lambda: chat_checkpointer
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test", follow_redirects=True

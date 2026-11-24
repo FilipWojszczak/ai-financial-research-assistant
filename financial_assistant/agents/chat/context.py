@@ -1,7 +1,8 @@
 """Per-turn runtime context: never checkpointed and never shown to the LLM as tool
 arguments, which keeps the user and the thread filters out of its reach."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -21,6 +22,27 @@ class ScopeDocument:
     year: int
 
 
+class TurnDecision:
+    """
+    Whether the turn was answered or cancelled, whichever comes first. Once answered,
+    only the checkpoint write is left, and interrupting that would leave the history
+    and the recorded outcome in disagreement.
+    """
+
+    def __init__(self) -> None:
+        self._outcome: Literal["answered", "cancelled"] | None = None
+
+    def answer(self) -> bool:
+        """False if the turn was already cancelled."""
+        self._outcome = self._outcome or "answered"
+        return self._outcome == "answered"
+
+    def cancel(self) -> bool:
+        """False if the turn was already answered."""
+        self._outcome = self._outcome or "cancelled"
+        return self._outcome == "cancelled"
+
+
 @dataclass(frozen=True)
 class ChatContext:
     user_id: int
@@ -34,3 +56,4 @@ class ChatContext:
     settings: Settings
     # In-scope documents beyond the ones listed; search still covers them.
     unlisted_documents: int = 0
+    decision: TurnDecision = field(default_factory=TurnDecision)

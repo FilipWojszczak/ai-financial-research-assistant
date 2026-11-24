@@ -1,5 +1,6 @@
 """Graph nodes: each takes (state, runtime) and returns a partial state update."""
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from functools import partial
@@ -228,6 +229,9 @@ class ChatNodes:
             raise AnswerUnavailableError from exc
         if not answer.answer.strip():
             raise AnswerUnavailableError
+        # No await from here on, so the runner can rely on the decision.
+        if not context.decision.answer():
+            raise asyncio.CancelledError
 
         cited_refs = set(answer.cited_refs)
         cited = [item for item in sources if item["ref"] in cited_refs]

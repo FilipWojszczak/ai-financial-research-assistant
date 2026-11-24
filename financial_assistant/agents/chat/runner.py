@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
+from contextlib import suppress
 from typing import Any
 from uuid import UUID
 
@@ -74,6 +75,13 @@ def _cancel_once(task: asyncio.Task[None]) -> None:
     # A second cancellation would interrupt the cleanup of the first one.
     if not task.cancelling():
         task.cancel()
+
+
+async def _settle(task: asyncio.Task[Any]) -> None:
+    """Wait for the task; a further cancellation (e.g. the deadline) can't stop that."""
+    while not task.done():
+        with suppress(asyncio.CancelledError):
+            await asyncio.wait({task})
 
 
 async def cancel_running_turns() -> None:
@@ -159,6 +167,16 @@ class ChatTurnRunner:
         usage = UsageMetadataCallbackHandler()
 
         async def record(status: ChatTurnStatus, error_code: str | None) -> bool:
+            # In its own task: a disconnect while the outcome is being written must
+            # not lose it (the thread would stay busy and the tokens uncounted).
+            recording = asyncio.create_task(write_outcome(status, error_code))
+            try:
+                return await asyncio.shield(recording)
+            except asyncio.CancelledError:
+                await recording
+                raise
+
+        async def write_outcome(status: ChatTurnStatus, error_code: str | None) -> bool:
             try:
                 await finish_turn(
                     self._session_factory,
@@ -233,7 +251,6 @@ class ChatTurnRunner:
         turn_id: UUID,
         question: str,
     ) -> dict[str, Any]:
-        settings = self._settings
         document_ids = thread.document_ids
         scope = RetrievalScope(
             user_id=user_id,
@@ -260,9 +277,31 @@ class ChatTurnRunner:
             scope_documents=scope_documents,
             session_factory=self._session_factory,
             retriever=self._retriever,
-            settings=settings,
+            settings=self._settings,
             unlisted_documents=unlisted,
         )
+        # In its own task: LangGraph doesn't protect the checkpoint write at the end of
+        # a run from cancellation, and stops waiting for it without stopping it.
+        run = asyncio.create_task(self._run_graph(queue, usage, context, question))
+        try:
+            await asyncio.wait({run})
+        except asyncio.CancelledError:
+            # A disconnect, a shutdown or the turn deadline.
+            cancelled = context.decision.cancel()
+            if cancelled:
+                run.cancel()
+            await _settle(run)
+            if cancelled:
+                raise
+        return run.result()
+
+    async def _run_graph(
+        self,
+        queue: asyncio.Queue[ChatEvent | None],
+        usage: UsageMetadataCallbackHandler,
+        context: ChatContext,
+        question: str,
+    ) -> dict[str, Any]:
         answer: dict[str, Any] | None = None
         # Every client event comes from the custom stream, so the agent's and
         # grader's tokens are never sent. durability="exit" writes the state once, at
@@ -271,10 +310,10 @@ class ChatTurnRunner:
         async for payload in self.graph.astream(
             {"question": question},
             config={
-                "configurable": {"thread_id": str(thread.id)},
+                "configurable": {"thread_id": str(context.thread_id)},
                 "callbacks": [usage, *langchain_callbacks()],
                 # Backstop; the loop itself ends through `round`.
-                "recursion_limit": 3 * settings.chat_max_retrieval_rounds + 4,
+                "recursion_limit": 3 * self._settings.chat_max_retrieval_rounds + 4,
                 "run_name": "chat_turn",
             },
             context=context,

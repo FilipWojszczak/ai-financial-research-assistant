@@ -1,22 +1,26 @@
 """The runner with a fake graph; the turn store is replaced by recording fakes."""
 
 import asyncio
+from contextlib import suppress
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.exc import OperationalError
 
+from financial_assistant.agents.chat import runner as runner_module
 from financial_assistant.agents.chat.context import ScopeDocument
+from financial_assistant.agents.chat.graph import build_chat_graph
 from financial_assistant.agents.chat.nodes import AnswerUnavailableError
 from financial_assistant.agents.chat.runner import (
     NO_DOCUMENTS_ANSWER,
     ChatTurnRunner,
     cancel_running_turns,
 )
-from financial_assistant.agents.chat.state import merge_sources
+from financial_assistant.agents.chat.state import chat_serializer, merge_sources
 from financial_assistant.agents.chat.tools import RetrievalUnavailableError
 from financial_assistant.models.chat import ChatTurnStatus
 from financial_assistant.models.document import DocumentType
@@ -24,8 +28,10 @@ from tests.utils import (
     FakeHybridRetriever,
     chat_settings,
     chunk_source,
+    fake_chat_models,
     fake_session_factory,
     provider_error,
+    tool_call_message,
 )
 
 pytestmark = pytest.mark.unit
@@ -221,6 +227,92 @@ async def test_closing_the_stream_cancels_the_run_and_records_partial_usage(fini
     assert finish.await_args.kwargs["status"] == ChatTurnStatus.CANCELLED
     assert finish.await_args.kwargs["usage"] == {"gemini-test": USAGE}
     assert finish.await_args.kwargs["error_code"] is None
+
+
+@pytest.mark.parametrize("cause", ["disconnect", "deadline"])
+async def test_an_answered_turn_is_completed_with_its_checkpoint(finish, cause):
+    # The real graph: interrupted while it writes the checkpoint after the answer.
+    writing, release = asyncio.Event(), asyncio.Event()
+
+    class SlowSaver(InMemorySaver):
+        async def aput(self, *args, **kwargs):
+            writing.set()
+            await release.wait()
+            return await super().aput(*args, **kwargs)
+
+    models = fake_chat_models(
+        [tool_call_message("revenue")],
+        answer=[{"answer": "Revenue was $5 [1].", "cited_refs": [1]}],
+    )
+    graph = build_chat_graph(models, checkpointer=SlowSaver(serde=chat_serializer()))
+    thread = SimpleNamespace(id=uuid4(), document_ids=None, company_ticker=None)
+    deadline = 0.3 if cause == "deadline" else 60
+    runner = _runner(graph, chat_turn_timeout_seconds=deadline)
+    stream = _stream(runner, thread)
+    assert (await anext(stream)).event == "turn"
+    await asyncio.wait_for(writing.wait(), timeout=5)
+    if cause == "disconnect":
+        await stream.aclose()
+    await asyncio.sleep(0.5)
+    finish.assert_not_awaited()  # The thread stays busy until the write has landed.
+
+    release.set()
+    await asyncio.gather(*runner_module._running_turns)
+    assert finish.await_args.kwargs["status"] == ChatTurnStatus.COMPLETED
+    state = await graph.aget_state({"configurable": {"thread_id": str(thread.id)}})
+    assert len(state.values["messages"]) == 2
+
+
+async def test_a_cancelled_turn_can_no_longer_be_answered(finish):
+    decision = None
+
+    class StubbornGraph(FakeGraph):
+        """Finishes its answer although it was cancelled."""
+
+        async def astream(self, graph_input, **kwargs):
+            nonlocal decision
+            decision = kwargs["context"].decision
+            yield {"type": "token", "text": "Reve"}
+            with suppress(asyncio.CancelledError):
+                await asyncio.Event().wait()
+            yield ANSWER
+
+    stream = _stream(_runner(StubbornGraph()))
+    assert (await anext(stream)).event == "turn"
+    assert (await anext(stream)).event == "token"
+    await stream.aclose()
+    await cancel_running_turns()
+    assert decision is not None
+    assert not decision.answer()
+    assert finish.await_args.kwargs["status"] == ChatTurnStatus.CANCELLED
+
+
+@pytest.mark.parametrize(
+    ("step", "status"),
+    [
+        (ANSWER, ChatTurnStatus.COMPLETED),
+        (AnswerUnavailableError(), ChatTurnStatus.FAILED),
+    ],
+)
+async def test_a_disconnect_while_recording_keeps_the_outcome(finish, step, status):
+    recording, release = asyncio.Event(), asyncio.Event()
+    written = []
+
+    async def slow_finish(*args, **kwargs):
+        recording.set()
+        await release.wait()
+        written.append(kwargs["status"])
+
+    finish.side_effect = slow_finish
+    stream = _stream(_runner(FakeGraph(step)))
+    assert (await anext(stream)).event == "turn"
+    await recording.wait()
+    await stream.aclose()
+    waiting = asyncio.create_task(cancel_running_turns())
+    await asyncio.sleep(0)
+    release.set()
+    await waiting
+    assert written == [status]
 
 
 async def test_shutdown_cancels_running_turns_and_lets_them_finish(finish):
